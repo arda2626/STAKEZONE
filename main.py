@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import io
 import sqlite3
 from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
+import threading
 
 # === UYARILARI KAPAT ===
 warnings.filterwarnings("ignore")
@@ -30,37 +31,14 @@ bot = telepot.Bot(BOT_TOKEN)
 # === VERİTABANI ===
 conn = sqlite3.connect(DATABASE, check_same_thread=False)
 cursor = conn.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT,
-    match TEXT,
-    prediction TEXT,
-    result TEXT,
-    stake INTEGER,
-    profit REAL
-)
-''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    invites INTEGER DEFAULT 0,
-    premium_until TEXT
-)
-''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS referrals (
-    inviter_id INTEGER,
-    invited_id INTEGER,
-    timestamp TEXT
-)
-''')
+cursor.execute('CREATE TABLE IF NOT EXISTS results (id INTEGER PRIMARY KEY, date TEXT, match TEXT, prediction TEXT, stake INTEGER)')
+cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, invites INTEGER DEFAULT 0, premium_until TEXT)')
+cursor.execute('CREATE TABLE IF NOT EXISTS referrals (inviter_id INTEGER, invited_id INTEGER, timestamp TEXT)')
 conn.commit()
 
 # === MODEL ===
-MODEL_FILE = '/tmp/stakezone_model.pkl'
-SCALER_FILE = '/tmp/stakezone_scaler.pkl'
+MODEL_FILE = '/tmp/model.pkl'
+SCALER_FILE = '/tmp/scaler.pkl'
 
 def train_model():
     print("STAKEZONE: Model eğitiliyor...")
@@ -101,26 +79,4 @@ def get_today_match():
             game = games[0]
             home = game['teams']['home']['name']
             away = game['teams']['visitors']['name']
-            return f"{away} @ {home}", game.get('id')
-        else:
-            print("STAKEZONE: Bugün maç yok, örnek maç kullanılıyor.")
-            return "Pistons @ Mavericks", None
-    except Exception as e:
-        print(f"STAKEZONE: API Hatası: {e}")
-        return "Pistons @ Mavericks", None
-
-# === TAHMİN ===
-def predict():
-    features = np.array([[118, 112, 47.5, 45.2, 9, 7]])
-    X_scaled = scaler.transform(features)
-    prob = model.predict_proba(X_scaled)[0][1] * 100
-    return prob
-
-# === GRAFİK ===
-def create_probability_graph(prob):
-    fig, ax = plt.subplots(figsize=(6, 2), facecolor='none')
-    ax.set_xlim(0, 100)
-    ax.set_ylim(0, 1)
-    ax.barh(0, prob, color='#00ff88', height=0.6)
-    ax.barh(0, 100 - prob, left=prob, color='#ff4444', height=0.6)
-    ax
+            return f"{
