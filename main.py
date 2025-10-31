@@ -13,7 +13,6 @@ import warnings
 import matplotlib.pyplot as plt
 import io
 import sqlite3
-import threading
 from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
 
 # === UYARILARI KAPAT ===
@@ -28,7 +27,7 @@ DATABASE = '/tmp/stakezone.db'
 
 bot = telepot.Bot(BOT_TOKEN)
 
-# === VERİTABANI (SQLite) ===
+# === VERİTABANI ===
 conn = sqlite3.connect(DATABASE, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''
@@ -64,7 +63,7 @@ MODEL_FILE = '/tmp/stakezone_model.pkl'
 SCALER_FILE = '/tmp/stakezone_scaler.pkl'
 
 def train_model():
-    print("STAKEZONE: XGBoost modeli eğitiliyor...")
+    print("STAKEZONE: Model eğitiliyor...")
     np.random.seed(42)
     data = pd.DataFrame({
         'home_ppg': np.random.uniform(105, 130, 1000),
@@ -96,4 +95,32 @@ def get_today_match():
     try:
         url = f"https://api-nba-v1.p.rapidapi.com/games?date={datetime.now().strftime('%Y-%m-%d')}"
         headers = {'X-RapidAPI-Key': RAPIDAPI_KEY, 'X-RapidAPI-Host': RAPIDAPI_HOST}
-        res = requests.get(url, headers=headers).
+        res = requests.get(url, headers=headers).json()
+        games = res.get('response', [])
+        if games:
+            game = games[0]
+            home = game['teams']['home']['name']
+            away = game['teams']['visitors']['name']
+            return f"{away} @ {home}", game.get('id')
+        else:
+            print("STAKEZONE: Bugün maç yok, örnek maç kullanılıyor.")
+            return "Pistons @ Mavericks", None
+    except Exception as e:
+        print(f"STAKEZONE: API Hatası: {e}")
+        return "Pistons @ Mavericks", None
+
+# === TAHMİN ===
+def predict():
+    features = np.array([[118, 112, 47.5, 45.2, 9, 7]])
+    X_scaled = scaler.transform(features)
+    prob = model.predict_proba(X_scaled)[0][1] * 100
+    return prob
+
+# === GRAFİK ===
+def create_probability_graph(prob):
+    fig, ax = plt.subplots(figsize=(6, 2), facecolor='none')
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 1)
+    ax.barh(0, prob, color='#00ff88', height=0.6)
+    ax.barh(0, 100 - prob, left=prob, color='#ff4444', height=0.6)
+    ax
