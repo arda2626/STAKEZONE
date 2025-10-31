@@ -4,7 +4,7 @@ import schedule
 import time
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 import joblib
@@ -16,10 +16,8 @@ import sqlite3
 from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
 import threading
 
-# === UYARILARI KAPAT ===
 warnings.filterwarnings("ignore")
 
-# === AYARLAR ===
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8393964009:AAGif15CiCgyXs33VFoF-BnaTUVf8xcMKVE')
 CHANNEL_ID = '@stakedrip'
 RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '8393964009:AAFQslrVuWh8ecoLQhguEdF-BUViI37cFFk')
@@ -28,15 +26,11 @@ DATABASE = '/tmp/stakezone.db'
 
 bot = telepot.Bot(BOT_TOKEN)
 
-# === VERİTABANI ===
 conn = sqlite3.connect(DATABASE, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('CREATE TABLE IF NOT EXISTS results (id INTEGER PRIMARY KEY, date TEXT, match TEXT, prediction TEXT, stake INTEGER)')
-cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, invites INTEGER DEFAULT 0, premium_until TEXT)')
-cursor.execute('CREATE TABLE IF NOT EXISTS referrals (inviter_id INTEGER, invited_id INTEGER, timestamp TEXT)')
 conn.commit()
 
-# === MODEL ===
 MODEL_FILE = '/tmp/model.pkl'
 SCALER_FILE = '/tmp/scaler.pkl'
 
@@ -68,7 +62,6 @@ if not os.path.exists(MODEL_FILE):
 model = joblib.load(MODEL_FILE)
 scaler = joblib.load(SCALER_FILE)
 
-# === MAÇ ÇEK ===
 def get_today_match():
     try:
         url = f"https://api-nba-v1.p.rapidapi.com/games?date={datetime.now().strftime('%Y-%m-%d')}"
@@ -79,4 +72,25 @@ def get_today_match():
             game = games[0]
             home = game['teams']['home']['name']
             away = game['teams']['visitors']['name']
-            return f"{
+            return f"{away} @ {home}"
+        else:
+            return "Pistons @ Mavericks"
+    except:
+        return "Pistons @ Mavericks"
+
+def predict():
+    features = np.array([[118, 112, 47.5, 45.2, 9, 7]])
+    X_scaled = scaler.transform(features)
+    prob = model.predict_proba(X_scaled)[0][1] * 100
+    return prob
+
+def create_graph(prob):
+    fig, ax = plt.subplots(figsize=(6, 2), facecolor='none')
+    ax.barh(0, prob, color='#00ff88', height=0.6)
+    ax.barh(0, 100 - prob, left=prob, color='#ff4444', height=0.6)
+    ax.text(prob/2, 0.3, f"{prob:.1f}%", color='black', fontsize=12, ha='center')
+    ax.text(prob + (100-prob)/2, 0.3, f"{100-prob:.1f}%", color='white', fontsize=12, ha='center')
+    ax.axis('off')
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight')
+    buf.seek(0
