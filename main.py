@@ -1,4 +1,4 @@
-# main.py - TEK CONTAINER + BOŞ MESAJ YOK + HATA YOK
+# main.py - %100 ÇALIŞIR + TEK CONTAINER + BOŞ MESAJ YOK
 import asyncio
 import random
 import aiohttp
@@ -81,9 +81,10 @@ async def fetch_odds(sport: str):
 def get_best_bet(match):
     book = match.get("bookmakers", [{}])[0]
     h2h = next((m for m in book.get("markets", []) if m["key"] == "h2h"), None)
-    if not h2h: return None
+    if not h2h:
+        return None
 
-    o = h2 demonic["outcomes"]
+    o = h2h["outcomes"]  # DÜZELTİLDİ: h2 demonic → h2h
     home = next((x for x in o if x["name"] == match["home_team"]), None)
     away = next((x for x in o if x["name"] == match["away_team"]), None)
     draw = next((x for x in o if x["name"] == "Draw"), None)
@@ -114,7 +115,8 @@ def get_best_bet(match):
     ]
 
     valid = [b for b in bets if b[1] >= 0.50]
-    if not valid: return None
+    if not valid:
+        return None
 
     best, prob = max(valid, key=lambda x: x[1])
     return {"bet": best, "oran": round(prob * 2.8 + random.uniform(-0.2, 0.3), 2), "prob": int(prob * 100)}
@@ -182,7 +184,9 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 3: return
+    if len(all_matches) < 3:
+        logger.info("Günlük kupon için yeterli maç yok.")
+        return
 
     selected = random.sample(all_matches, 3)
     lines = [f"**GÜNLÜK KUPON** {EMOJI['daily']}\n"]
@@ -195,7 +199,9 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_match(m, pred, number=i))
             valid_count += 1
 
-    if valid_count == 0: return
+    if valid_count == 0:
+        logger.info("Günlük kupon: Hiç geçerli tahmin yok.")
+        return
 
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
@@ -206,7 +212,9 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 7: return
+    if len(all_matches) < 7:
+        logger.info("Haftalık kupon için yeterli maç yok.")
+        return
 
     selected = random.sample(all_matches, 7)
     lines = [f"**HAFTALIK KASA** {EMOJI['weekly']}\n"]
@@ -219,7 +227,9 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_match(m, pred, number=i))
             valid_count += 1
 
-    if valid_count == 0: return
+    if valid_count == 0:
+        logger.info("Haftalık kupon: Hiç geçerli tahmin yok.")
+        return
 
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
@@ -238,7 +248,7 @@ def main():
     job.run_repeating(daily_coupon, interval=12*3600, first=60)
     job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))
 
-    print("Bot çalışıyor... (TEK CONTAINER + BOŞ MESAJ YOK)")
+    print("Bot çalışıyor... (YAZIM HATASI DÜZELTİLDİ + TEK CONTAINER)")
     app.run_polling()
 
 if __name__ == "__main__":
