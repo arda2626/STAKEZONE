@@ -46,8 +46,8 @@ from telegram.ext import (
 # -----------------------
 # CONFIG (ENV)
 # -----------------------
-BOT_TOKEN = os.getenv("BOT_TOKEN")           # required
-API_SPORTS_KEY = os.getenv("API_SPORTS_KEY") # required for real matches
+BOT_TOKEN = os.getenv("8393964009:AAGif15CiCgyXs33VFoF-BnaTUVf8xcMKVE")           # required
+API_SPORTS_KEY = os.getenv("460ec2a26e2178f365e61e063bb6b487") # required for real matches
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
 DB_PATH = os.getenv("DB_PATH", "/tmp/stakezone_pro.db")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
