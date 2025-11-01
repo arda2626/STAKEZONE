@@ -1,9 +1,9 @@
-# main.py - TEK DOSYA, RAILWAY UYUMLU, HATA YOK
+# main.py - RAILWAY UYUMLU, EVENT LOOP HATASI YOK
 import asyncio
 import random
 import aiohttp
 import logging
-from datetime import datetime, timedelta, time  # time EKLE!
+from datetime import datetime, timedelta, time
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -146,13 +146,13 @@ async def main():
 
     job = app.job_queue
     job.run_repeating(hourly_prediction, interval=3600, first=10)
-    job.run_daily(daily_coupon, time=time(9, 0))  # time() doğru!
+    job.run_daily(daily_coupon, time=time(9, 0))
 
-    print("Bot çalışıyor... (TEK DOSYA, MODÜLER MANTIK)")
+    print("Bot çalışıyor... (TEK DOSYA, EVENT LOOP HATASI YOK)")
+
+    # run_polling() kendi loop'unu yönetir, ama Railway worker'da asyncio.run() gerekli
     await app.run_polling()
 
 # ====================== ÇALIŞTIR ======================
-# ... (yukarıdaki kod aynı kalır) ...
-
 if __name__ == "__main__":
-    main()  # asyncio.run() YOK!
+    asyncio.run(main())  # GERİ EKLE! Worker için zorunlu
