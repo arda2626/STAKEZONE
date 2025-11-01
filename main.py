@@ -1,4 +1,4 @@
-# main.py - RENKLİ + CANLI AYRI + TEMİZ FORMAT
+# main.py - HATA YOK + BOŞ MESAJ ENGELLENDİ + NET FORMAT
 import asyncio
 import random
 import aiohttp
@@ -27,21 +27,28 @@ SPORTS = {
     "tennis": ["tennis_atp_singles"]
 }
 
-# ====================== ZAMAN (GMT+3) ======================
+EMOJI = {
+    "football": "Football", "basketball": "Basketball", "tennis": "Tennis",
+    "live": "Fire", "upcoming": "Briefcase", "daily": "Ticket", "weekly": "Gem"
+}
+
+# ====================== ZAMAN (GMT+3 + TARİH) ======================
 def get_time_info(match):
     try:
         dt = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00"))
         dt_ist = dt.astimezone(timezone(timedelta(hours=3)))
+        date_str = dt_ist.strftime("%d.%m.%Y")
         time_str = dt_ist.strftime("%H:%M")
     except:
+        date_str = "Bilinmiyor"
         time_str = "??:??"
 
     now = datetime.now(timezone.utc)
     if dt <= now <= dt + timedelta(minutes=120):
         mins = int((now - dt).total_seconds() // 60)
-        return f"`{mins}'` Dakika `Fire`"
+        return f"`{date_str}` – `{mins}'` {EMOJI['live']}"
     else:
-        return f"`{time_str}` Başlayacak"
+        return f"`{date_str}` – `{time_str}` {EMOJI['upcoming']}"
 
 # ====================== API ======================
 async def fetch_odds(sport: str):
@@ -56,7 +63,7 @@ async def fetch_odds(sport: str):
                         data = await resp.json()
                         for game in data:
                             game["sport"] = sport
-                            game["league"] = game.get("sport_nice", code.split("_")[-1].title())
+                            game["league"] = game.get("sport_nice", code.split("_")[-1].replace("_", " ").title())
                             matches.append(game)
         except Exception as e:
             logger.error(f"{code} hatası: {e}")
@@ -89,9 +96,9 @@ def get_best_bet(match):
     p_kg_yok = 1 - p_kg_var
 
     bets = [
-        ("1 (Ev Sahibi)", p_home),
-        ("X (Berabere)", p_draw),
-        ("2 (Deplasman)", p_away),
+        ("1 (Ev)", p_home),
+        ("X", p_draw),
+        ("2 (Dep)", p_away),
         ("Üst 2.5", p_over),
         ("Alt 2.5", p_under),
         ("KG Var", p_kg_var),
@@ -105,22 +112,23 @@ def get_best_bet(match):
     return {"bet": best, "oran": round(prob * 2.8 + random.uniform(-0.2, 0.3), 2), "prob": int(prob * 100)}
 
 # ====================== FORMAT ======================
-def format_match(match, pred, is_live=False):
-    emoji = {"football": "Football", "basketball": "Basketball", "tennis": "Tennis"}.get(match["sport"], "Unknown")
+def format_match(match, pred, number=None, is_live=False):
+    sport_emoji = EMOJI.get(match["sport"], "Unknown")
     time_info = get_time_info(match)
-    live_tag = "`CANLI ATEŞ`" if is_live else ""
+    live_tag = EMOJI['live'] if is_live else ""
+    num = f"{number}. " if number else ""
     return (
-        f"**{match['home_team']} vs {match['away_team']}** {emoji} {live_tag}\n"
-        f"{time_info} | `{match.get('league', 'Lig')}`\n"
-        f"**{pred['bet']}** → **{pred['oran']}** | `%{pred['prob']} AI`"
+        f"{num}**{match['home_team']} vs {match['away_team']}** {sport_emoji} {live_tag}\n"
+        f"   {time_info} | `{match.get('league', 'Lig')}`\n"
+        f"   **{pred['bet']}** → **{pred['oran']}** | `%{pred['prob']} AI`"
     )
 
-# ====================== SAAT BAŞI (CANLI + YAKLAŞAN AYRI) ======================
+# ====================== SAAT BAŞI ======================
 async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
     live_matches = []
     upcoming_matches = []
 
-    for sport in ["football", "basketball", "tennis"]:
+    for sport in SPORTS:
         matches = await fetch_odds(sport)
         for m in matches:
             pred = get_best_bet(m)
@@ -133,26 +141,35 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
                 upcoming_matches.append({"match": m, "pred": pred})
 
     lines = []
+    ist_now = datetime.now(timezone(timedelta(hours=3))).strftime("%H:%M")
+    lines.append(f"**{ist_now} TEZGAH** {EMOJI['upcoming']}\n")
 
-    # CANLI MAÇLAR
+    has_content = False
+
+    # Canlı Maçlar
     if live_matches:
-        live_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)[:3]
-        lines.append("**`CANLI ATEŞ` TEZGAH** `Fire`")
-        for item in live_matches:
-            lines.append(format_match(item["match"], item["pred"], is_live=True))
+        live_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)
+        selected_live = live_matches[:3]
+        lines.append(f"**CANLI ATEŞ** {EMOJI['live']}")
+        for i, item in enumerate(selected_live, 1):
+            lines.append(format_match(item["match"], item["pred"], number=i, is_live=True))
+        has_content = True
 
-    # YAKLAŞAN MAÇLAR
+    # Yaklaşan Maçlar
     if upcoming_matches:
-        upcoming_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)[:5]
-        lines.append("\n**`YAKLAŞAN` TEZGAH** `Briefcase`")
-        for item in upcoming_matches:
-            lines.append(format_match(item["match"], item["pred"], is_live=False))
+        upcoming_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)
+        selected_upcoming = upcoming_matches[:5]
+        if live_matches: lines.append("")
+        start_num = len(selected_live) + 1 if live_matches else 1
+        for i, item in enumerate(selected_upcoming, start_num):
+            lines.append(format_match(item["match"], item["pred"], number=i))
+        has_content = True
 
-    if not lines:
-        return
-
-    msg = "\n".join(lines)
-    await context.bot.send_message(CHANNEL, msg, parse_mode='Markdown')
+    # BOŞ MESAJ ENGELLE
+    if has_content:
+        await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
+    else:
+        logger.info("Bu saat tahmin yok, mesaj gönderilmedi.")
 
 # ====================== GÜNLÜK KUPON ======================
 async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
@@ -160,15 +177,25 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 3: return
+    if len(all_matches) < 3:
+        logger.info("Günlük kupon için yeterli maç yok.")
+        return
+
     selected = random.sample(all_matches, 3)
-    lines = ["**`GÜNLÜK KUPON` Ticket**"]
+    lines = [f"**GÜNLÜK KUPON** {EMOJI['daily']}\n"]
     total = 1.0
-    for m in selected:
+    valid_count = 0
+    for i, m in enumerate(selected, 1):
         pred = get_best_bet(m)
         if pred:
             total *= pred["oran"]
-            lines.append(format_match(m, pred))
+            lines.append(format_match(m, pred, number=i))
+            valid_count += 1
+
+    if valid_count == 0:
+        logger.info("Günlük kupon: Hiç geçerli tahmin yok.")
+        return
+
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
 
@@ -178,15 +205,25 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 7: return
+    if len(all_matches) < 7:
+        logger.info("Haftalık kupon için yeterli maç yok.")
+        return
+
     selected = random.sample(all_matches, 7)
-    lines = ["**`HAFTALIK KASA` Gem**"]
+    lines = [f"**HAFTALIK KASA** {EMOJI['weekly']}\n"]
     total = 1.0
-    for m in selected:
+    valid_count = 0
+    for i, m in enumerate(selected, 1):
         pred = get_best_bet(m)
         if pred:
             total *= pred["oran"]
-            lines.append(format_match(m, pred))
+            lines.append(format_match(m, pred, number=i))
+            valid_count += 1
+
+    if valid_count == 0:
+        logger.info("Haftalık kupon: Hiç geçerli tahmin yok.")
+        return
+
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
 
@@ -204,7 +241,7 @@ def main():
     job.run_repeating(daily_coupon, interval=12*3600, first=60)
     job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))
 
-    print("Bot çalışıyor... (RENKLİ + CANLI AYRI + TEMİZ)")
+    print("Bot çalışıyor... (HATA YOK + BOŞ MESAJ YOK)")
     app.run_polling()
 
 if __name__ == "__main__":
