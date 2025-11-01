@@ -485,7 +485,7 @@ def register_handlers(app):
     app.add_handler(CommandHandler("trend", trend_cmd))
     app.add_handler(CommandHandler("surpriz", surpriz_cmd))
 
-# ---------------- JOB SCHEDULER ----------------# ---------------- SCHEDULER ----------------
+## ---------------- JOB SCHEDULER ----------------
 def seconds_until_next_hour() -> int:
     """Bir sonraki saat başına kalan saniyeyi döndürür."""
     try:
@@ -506,12 +506,14 @@ async def schedule_jobs(app):
     try:
         first_hour = seconds_until_next_hour()
         # Saat başı tahmin gönder
-        jq.run_repeating(send_hourly_predictions, interval=3600, first=first_hour)
+        jq.run_repeating(lambda ctx: asyncio.create_task(send_hourly_predictions(ctx)), interval=3600, first=first_hour)
         # 6 saatte bir günlük kupon
-        jq.run_repeating(send_daily_coupon, interval=60*60*6, first=10)
+        jq.run_repeating(lambda ctx: asyncio.create_task(send_daily_coupon(ctx)), interval=6*3600, first=10)
         # 5 dakikada bir sonuçları kontrol et
-        jq.run_repeating(lambda ctx: asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api),
-                         interval=300, first=30)
+        jq.run_repeating(lambda ctx: asyncio.create_task(
+            asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api)),
+            interval=300, first=30
+        )
         logger.info("✅ JobQueue planlandı (tahmin, kupon, sonuç kontrol)")
     except Exception:
         logger.exception("❌ schedule_jobs içinde hata oluştu.")
@@ -522,6 +524,7 @@ def main():
         logger.info("🚀 StakeDrip Pro başlatılıyor...")
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         register_handlers(app)
+        # Job scheduler'ı async olarak başlat
         app.job_queue.run_once(lambda ctx: asyncio.create_task(schedule_jobs(app)), 1)
         logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
         app.run_polling()
