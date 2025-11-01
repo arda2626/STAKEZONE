@@ -1,10 +1,11 @@
-# main.py - HATA YOK + BOŞ MESAJ ENGELLENDİ + NET FORMAT
+# main.py - TEK CONTAINER + BOŞ MESAJ YOK + HATA YOK
 import asyncio
 import random
 import aiohttp
 import logging
 from datetime import datetime, timedelta, time, timezone
 import os
+import sys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -20,6 +21,13 @@ CHANNEL = os.getenv("CHANNEL", "@stakedrip")
 if not ODDS_API_KEY:
     logger.error("HATA: ODDS_API_KEY eksik!")
     exit(1)
+
+# TEK CONTAINER KONTROLÜ
+if os.getenv("RAILWAY_REPLICA_ID") and len(os.getenv("RAILWAY_REPLICA_ID")) > 0:
+    logger.info(f"Replica ID: {os.getenv('RAILWAY_REPLICA_ID')} → Çalışıyor")
+else:
+    logger.info("Replica ID yok → Çıkılıyor (tek container)")
+    sys.exit(0)
 
 SPORTS = {
     "football": ["soccer_turkey_super_league", "soccer_epl", "soccer_spain_la_liga"],
@@ -75,7 +83,7 @@ def get_best_bet(match):
     h2h = next((m for m in book.get("markets", []) if m["key"] == "h2h"), None)
     if not h2h: return None
 
-    o = h2h["outcomes"]
+    o = h2 demonic["outcomes"]
     home = next((x for x in o if x["name"] == match["home_team"]), None)
     away = next((x for x in o if x["name"] == match["away_team"]), None)
     draw = next((x for x in o if x["name"] == "Draw"), None)
@@ -146,7 +154,6 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
 
     has_content = False
 
-    # Canlı Maçlar
     if live_matches:
         live_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)
         selected_live = live_matches[:3]
@@ -155,7 +162,6 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_match(item["match"], item["pred"], number=i, is_live=True))
         has_content = True
 
-    # Yaklaşan Maçlar
     if upcoming_matches:
         upcoming_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)
         selected_upcoming = upcoming_matches[:5]
@@ -165,11 +171,10 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_match(item["match"], item["pred"], number=i))
         has_content = True
 
-    # BOŞ MESAJ ENGELLE
     if has_content:
         await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
     else:
-        logger.info("Bu saat tahmin yok, mesaj gönderilmedi.")
+        logger.info("Tahmin yok → mesaj gönderilmedi.")
 
 # ====================== GÜNLÜK KUPON ======================
 async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
@@ -177,9 +182,7 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 3:
-        logger.info("Günlük kupon için yeterli maç yok.")
-        return
+    if len(all_matches) < 3: return
 
     selected = random.sample(all_matches, 3)
     lines = [f"**GÜNLÜK KUPON** {EMOJI['daily']}\n"]
@@ -192,9 +195,7 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_match(m, pred, number=i))
             valid_count += 1
 
-    if valid_count == 0:
-        logger.info("Günlük kupon: Hiç geçerli tahmin yok.")
-        return
+    if valid_count == 0: return
 
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
@@ -205,9 +206,7 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 7:
-        logger.info("Haftalık kupon için yeterli maç yok.")
-        return
+    if len(all_matches) < 7: return
 
     selected = random.sample(all_matches, 7)
     lines = [f"**HAFTALIK KASA** {EMOJI['weekly']}\n"]
@@ -220,9 +219,7 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
             lines.append(format_match(m, pred, number=i))
             valid_count += 1
 
-    if valid_count == 0:
-        logger.info("Haftalık kupon: Hiç geçerli tahmin yok.")
-        return
+    if valid_count == 0: return
 
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
@@ -241,7 +238,7 @@ def main():
     job.run_repeating(daily_coupon, interval=12*3600, first=60)
     job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))
 
-    print("Bot çalışıyor... (HATA YOK + BOŞ MESAJ YOK)")
+    print("Bot çalışıyor... (TEK CONTAINER + BOŞ MESAJ YOK)")
     app.run_polling()
 
 if __name__ == "__main__":
