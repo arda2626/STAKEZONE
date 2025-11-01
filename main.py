@@ -322,9 +322,16 @@ async def start_bot():
 
 # ---------------- RUN ----------------
 if __name__ == "__main__":
+    import asyncio
+    import logging
+
+    logger.info("🚀 StakeDrip Pro başlatılıyor...")
+
     try:
-        loop = asyncio.get_running_loop()
-        asyncio.create_task(start_bot())
-        logger.info("✅ Bot başlatıldı (mevcut loop üzerinde).")
-    except RuntimeError:
+        # start_bot() içinde app.run_polling() zaten kendi loop'unu yönetiyor
         asyncio.run(start_bot())
+    except RuntimeError as e:
+        # Eğer "event loop already running" hatası gelirse
+        logger.warning("Event loop zaten çalışıyor, create_task ile başlatılıyor.")
+        loop = asyncio.get_event_loop()
+        loop.create_task(start_bot())
