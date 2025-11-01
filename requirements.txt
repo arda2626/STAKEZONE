@@ -1,9 +1,5 @@
 python-telegram-bot==20.7
-pandas
-numpy
-xgboost
-joblib
-matplotlib
-requests
-schedule
-sqlite3-binary
+pandas==2.2.2
+numpy==1.26.1
+xgboost==1.7.6
+joblib==1.3.2
