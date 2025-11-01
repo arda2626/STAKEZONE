@@ -1,8 +1,9 @@
-python-telegram-bot==20.6
-requests
-Pillow
-joblib
+python-telegram-bot==20.7
+pandas
 numpy
-scikit-learn
 xgboost
+joblib
 matplotlib
+requests
+schedule
+sqlite3-binary
