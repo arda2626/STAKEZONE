@@ -485,18 +485,31 @@ def register_handlers(app):
     app.add_handler(CommandHandler("trend", trend_cmd))
     app.add_handler(CommandHandler("surpriz", surpriz_cmd))
 
-# ---------------- JOB SCHEDULER ----------------
-async def schedule_jobs(app):
+# ---------------- JOB SCHEDULER ----------------# ---------------- SCHEDULER ----------------
+def seconds_until_next_hour() -> int:
+    """Bir sonraki saat başına kalan saniyeyi döndürür."""
     try:
-        jq = app.job_queue
-        if not jq:
-            logger.warning("⚠️ JobQueue başlatılamadı — tahmin planlayıcısı devre dışı.")
-            return
+        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+        next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        seconds = (next_hour - now).total_seconds()
+        return max(1, int(seconds))
+    except Exception:
+        logger.exception("seconds_until_next_hour hatası!")
+        return 3600  # hata olursa 1 saat bekle
 
-        # Her saat başı tahmin, 6 saatte bir kupon, 5 dk aralıkla sonuç kontrol
+async def schedule_jobs(app):
+    jq = getattr(app, "job_queue", None)
+    if not jq:
+        logger.warning("⚠️ JobQueue başlatılamadı — tahmin planlayıcısı devre dışı.")
+        return
+
+    try:
         first_hour = seconds_until_next_hour()
+        # Saat başı tahmin gönder
         jq.run_repeating(send_hourly_predictions, interval=3600, first=first_hour)
+        # 6 saatte bir günlük kupon
         jq.run_repeating(send_daily_coupon, interval=60*60*6, first=10)
+        # 5 dakikada bir sonuçları kontrol et
         jq.run_repeating(lambda ctx: asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api),
                          interval=300, first=30)
         logger.info("✅ JobQueue planlandı (tahmin, kupon, sonuç kontrol)")
