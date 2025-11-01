@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# stakebot_pro.py — StakeDrip Pro Full Version
-
+# StakeDrip Pro — Tüm Modüller Aktif, Tek Dosya
 import os, io, math, time, json, random, logging, sqlite3, asyncio, requests
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# Optional ML model
+# ML model optional
 try:
-    import joblib, numpy as np
+    import joblib
+    import numpy as np
     from sklearn.preprocessing import StandardScaler
     from xgboost import XGBClassifier
     MODEL_AVAILABLE = True
@@ -16,7 +16,7 @@ except Exception:
     MODEL_AVAILABLE = False
 
 from telegram import InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ---------------- CONFIG ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -27,7 +27,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 TIMEZONE = os.getenv("TIMEZONE", "UTC")
 
 if not BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN environment variable is required!")
+    raise SystemExit("BOT_TOKEN required!")
 
 # ---------------- Logging ----------------
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -66,26 +66,6 @@ CREATE TABLE IF NOT EXISTS coupons (
 """)
 conn.commit()
 
-# ---------------- Helpers ----------------
-def utcnow():
-    return datetime.utcnow().replace(tzinfo=timezone.utc)
-
-async def fetch_json_async(url: str, headers: dict=None, params: dict=None, timeout: int=10):
-    loop = asyncio.get_event_loop()
-    def _get():
-        try:
-            r = requests.get(url, headers=headers, params=params, timeout=timeout)
-            return r.status_code, r.text
-        except Exception as e:
-            return None, str(e)
-    status, text = await loop.run_in_executor(None, _get)
-    if status != 200:
-        return None
-    try:
-        return json.loads(text)
-    except Exception:
-        return None
-
 # ---------------- Model ----------------
 MODEL_FILE = os.getenv("MODEL_FILE", "/tmp/model.pkl")
 SCALER_FILE = os.getenv("SCALER_FILE", "/tmp/scaler.pkl")
@@ -117,8 +97,7 @@ def train_fallback_model():
 if MODEL_AVAILABLE:
     try:
         if not (os.path.exists(MODEL_FILE) and os.path.exists(SCALER_FILE)):
-            ok = train_fallback_model()
-            if not ok:
+            if not train_fallback_model():
                 MODEL_AVAILABLE = False
         if MODEL_AVAILABLE:
             model = joblib.load(MODEL_FILE)
@@ -135,185 +114,180 @@ def predict_probability(features: Optional[List[float]] = None) -> float:
                 features = [118,112,47.5,45.2,9,7]
             X = np.array([features])
             Xs = scaler.transform(X)
-            p = model.predict_proba(Xs)[0][1] * 100
-            return float(round(p,1))
+            return float(round(model.predict_proba(Xs)[0][1]*100,1))
     except Exception:
-        logger.exception("Model failed; fallback.")
-    base = 50 + (math.sin(datetime.utcnow().hour/24*2*math.pi) * 10)
+        logger.exception("Model fallback used.")
+    base = 50 + (math.sin(datetime.utcnow().hour/24*2*math.pi)*10)
     jitter = random.uniform(-8,8)
-    return round(max(1, min(99, base + jitter)), 1)
+    return round(max(1, min(99, base+jitter)),1)
+
+# ---------------- Helpers ----------------
+def utcnow():
+    return datetime.utcnow().replace(tzinfo=timezone.utc)
+
+async def fetch_json_async(url: str, headers=None, params=None, timeout: int=10):
+    loop = asyncio.get_event_loop()
+    def _get():
+        try:
+            r = requests.get(url, headers=headers, params=params, timeout=timeout)
+            return r.status_code, r.text
+        except Exception as e:
+            return None, str(e)
+    status, text = await loop.run_in_executor(None, _get)
+    if status != 200:
+        return None
+    try:
+        return json.loads(text)
+    except:
+        return None
+
+# ---------------- API Fetchers ----------------
+HEADERS = {"x-apisports-key": API_SPORTS_KEY} if API_SPORTS_KEY else {}
+FOOTBALL_HOST = "v3.football.api-sports.io"
+BASKETBALL_HOST = "v2.basketball.api-sports.io"
+TENNIS_HOST = "v1.tennis.api-sports.io"
+
+async def fetch_football_fixtures():
+    if not API_SPORTS_KEY: return None
+    url = f"https://{FOOTBALL_HOST}/fixtures"
+    params = {"date": utcnow().strftime("%Y-%m-%d")}
+    return await fetch_json_async(url, headers=HEADERS, params=params)
+
+async def fetch_basketball_games():
+    if not API_SPORTS_KEY: return None
+    url = f"https://{BASKETBALL_HOST}/games"
+    params = {"date": utcnow().strftime("%Y-%m-%d")}
+    return await fetch_json_async(url, headers=HEADERS, params=params)
+
+async def fetch_tennis_matches():
+    if not API_SPORTS_KEY: return None
+    url = f"https://{TENNIS_HOST}/matches"
+    params = {"date": utcnow().strftime("%Y-%m-%d")}
+    return await fetch_json_async(url, headers=HEADERS, params=params)
 
 # ---------------- Visual ----------------
 ASSET_FONT = os.path.join(os.path.dirname(__file__), "assets", "neon.ttf")
 def create_neon_card(title: str, subtitle: str, prob: float, footer: str="") -> io.BytesIO:
-    W, H = 1200, 520
-    bg = Image.new("RGBA", (W,H), (6,6,10,255))
-    txt = Image.new("RGBA", (W,H), (0,0,0,0))
+    W,H = 1200,520
+    bg = Image.new("RGBA",(W,H),(6,6,10,255))
+    txt = Image.new("RGBA",(W,H),(0,0,0,0))
     draw = ImageDraw.Draw(txt)
     try:
-        fbig = ImageFont.truetype(ASSET_FONT, 72)
-        fmed = ImageFont.truetype(ASSET_FONT, 32)
-    except Exception:
+        fbig = ImageFont.truetype(ASSET_FONT,72)
+        fmed = ImageFont.truetype(ASSET_FONT,32)
+    except:
         fbig = ImageFont.load_default()
         fmed = ImageFont.load_default()
-    x,y = 60,60
-    for o,a in [(16,28),(8,90),(4,200)]:
-        draw.text((x+o,y+o), title, font=fbig, fill=(60,160,255,a))
+    x,y=60,60
+    draw.text((x+16,y+28), title, font=fbig, fill=(60,160,255,28))
     draw.text((x,y), title, font=fbig, fill=(190,240,255,255))
-    draw.text((x, y+110), subtitle, font=fmed, fill=(230,200,255,255))
-    bar_x, bar_y = x, H-140
+    draw.text((x,y+110), subtitle, font=fmed, fill=(230,200,255,255))
+    bar_x, bar_y = x,H-140
     bar_w = 820
-    filled = int(bar_w * (prob/100.0))
-    draw.rectangle([bar_x, bar_y, bar_x+filled, bar_y+36], fill=(0,220,150,255))
-    draw.rectangle([bar_x+filled, bar_y, bar_x+bar_w, bar_y+36], fill=(255,80,80,160))
-    draw.text((bar_x+bar_w+20, bar_y-2), f"{prob}%", font=fmed, fill=(240,240,240,255))
-    if footer:
-        draw.text((x, H-60), footer, font=fmed, fill=(180,180,200,200))
+    filled = int(bar_w*(prob/100))
+    draw.rectangle([bar_x,bar_y,bar_x+filled,bar_y+36], fill=(0,220,150,255))
+    draw.rectangle([bar_x+filled,bar_y,bar_x+bar_w,bar_y+36], fill=(255,80,80,160))
+    draw.text((bar_x+bar_w+20,bar_y-2), f"{prob}%", font=fmed, fill=(240,240,240,255))
+    if footer: draw.text((x,H-60),footer,font=fmed,fill=(180,180,200,200))
     glow = txt.filter(ImageFilter.GaussianBlur(4))
     combined = Image.alpha_composite(bg, glow)
     combined = Image.alpha_composite(combined, txt)
-    buf = io.BytesIO()
-    combined.convert("RGB").save(buf, "PNG", optimize=True)
+    buf=io.BytesIO()
+    combined.convert("RGB").save(buf,"PNG",optimize=True)
     buf.seek(0)
     return buf
 
-# ---------------- MATCH FETCH ----------------
-FOOTBALL_HOST = "v3.football.api-sports.io"
-BASKETBALL_HOST = "v2.basketball.api-sports.io"
-TENNIS_HOST = "v1.tennis.api-sports.io"
-HEADERS = {"x-apisports-key": API_SPORTS_KEY} if API_SPORTS_KEY else {}
-
-async def collect_upcoming_matches(window_hours:int=24) -> List[Tuple[str,str,datetime,str]]:
+# ---------------- Match Collection ----------------
+async def collect_upcoming_matches(window_hours: int=24) -> List[Tuple[str,str,datetime,str]]:
     now = utcnow()
-    cutoff = now + timedelta(hours=window_hours)
-    matches = []
-
-    # Futbol
-    if API_SPORTS_KEY:
-        fb_url = f"https://{FOOTBALL_HOST}/fixtures"
-        fb_params = {"date": now.strftime("%Y-%m-%d")}
-        fb_data = await fetch_json_async(fb_url, headers=HEADERS, params=fb_params)
-        if fb_data and fb_data.get("response"):
-            for f in fb_data["response"]:
-                try:
-                    start = datetime.fromisoformat(f["fixture"]["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
-                    if now < start < cutoff:
-                        home = f["teams"]["home"]["name"]
-                        away = f["teams"]["away"]["name"]
-                        mid = str(f["fixture"]["id"])
-                        matches.append((f"{away} vs {home}", "FUTBOL", start, mid))
-                except: continue
-
-    # Basket
-    if API_SPORTS_KEY:
-        bb_url = f"https://{BASKETBALL_HOST}/games"
-        bb_params = {"date": now.strftime("%Y-%m-%d")}
-        bb_data = await fetch_json_async(bb_url, headers=HEADERS, params=bb_params)
-        if bb_data and bb_data.get("response"):
-            for g in bb_data["response"]:
-                try:
-                    start = datetime.fromisoformat(g["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
-                    if now < start < cutoff:
-                        home = g["teams"]["home"]["name"]
-                        away = g["teams"]["visitors"]["name"]
-                        gid = str(g.get("id") or g.get("gameId") or "")
-                        matches.append((f"{away} @ {home}", "BASKETBOL", start, gid))
-                except: continue
-
-    # Tenis
-    if API_SPORTS_KEY:
-        tn_url = f"https://{TENNIS_HOST}/matches"
-        tn_params = {"date": now.strftime("%Y-%m-%d")}
-        tn_data = await fetch_json_async(tn_url, headers=HEADERS, params=tn_params)
-        if tn_data and tn_data.get("response"):
-            for m in tn_data["response"]:
-                try:
-                    start = datetime.fromisoformat(m["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
-                    players = f"{m['players'][0]['name']} vs {m['players'][1]['name']}"
-                    mid = str(m.get("id") or "")
-                    matches.append((players, "TENIS", start, mid))
-                except: continue
-
+    cutoff = now+timedelta(hours=window_hours)
+    matches=[]
+    # --- Football ---
+    fb = await fetch_football_fixtures()
+    if fb and fb.get("response"):
+        for f in fb["response"]:
+            try:
+                start = datetime.fromisoformat(f["fixture"]["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                if now<start<cutoff:
+                    home=f["teams"]["home"]["name"]
+                    away=f["teams"]["away"]["name"]
+                    mid=str(f["fixture"]["id"])
+                    league=f["league"]["name"]
+                    if league in ["Premier League","La Liga","Serie A","Bundesliga","Ligue 1","Süper Lig"]:
+                        matches.append((f"{away} vs {home}","FUTBOL",start,mid))
+            except: continue
+    # --- Basketball ---
+    nb = await fetch_basketball_games()
+    if nb and nb.get("response"):
+        for g in nb["response"]:
+            try:
+                start = datetime.fromisoformat(g["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                if now<start<cutoff:
+                    home=g["teams"]["home"]["name"]
+                    away=g["teams"]["visitors"]["name"]
+                    gid=str(g.get("id") or g.get("gameId") or "")
+                    league=g.get("league",{}).get("name","")
+                    if league in ["NBA","EuroLeague","BSL","Liga ACB"]:
+                        matches.append((f"{away} @ {home}","BASKETBOL",start,gid))
+            except: continue
+    # --- Tennis ---
+    tn = await fetch_tennis_matches()
+    if tn and tn.get("response"):
+        for m in tn["response"]:
+            try:
+                start = datetime.fromisoformat(m["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                if now<start<cutoff:
+                    players=f"{m['players'][0]['name']} vs {m['players'][1]['name']}"
+                    mid=str(m.get("id") or "")
+                    matches.append((players,"TENIS",start,mid))
+            except: continue
     matches.sort(key=lambda x:x[2])
     return matches
 
-def prob_to_odd(p:float) -> float:
-    fair = max(1.01, round(100.0/max(1.0,p),2))
-    return round(fair + 0.02,2)
+# ---------------- Prediction ----------------
+async def generate_predictions(matches: List[Tuple[str,str,datetime,str]]):
+    results=[]
+    for match,sport,start,mid in matches:
+        prob = predict_probability()
+        stake = random.choice([5,10,15])
+        results.append((datetime.utcnow().isoformat(), start.isoformat(), sport, match, "1X2", stake, prob, None, mid,"PENDING","", ""))
+    return results
 
-# ---------------- JOBS ----------------
-async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
-    try:
-        matches = await collect_upcoming_matches(window_hours=24)
-        if not matches:
-            logger.info("No upcoming matches in next 24h")
-            return
-        for match_name, sport, start, mid in matches[:5]:
-            prob = predict_probability()
-            stake = 10
-            prediction = "1" if prob>50 else "0"
-            cursor.execute("""
-                INSERT INTO results (created_at,date,sport,match,prediction,stake,prob,game_id,status)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
-            """, (utcnow().isoformat(), start.date().isoformat(), sport, match_name, prediction, stake, prob, mid, "PENDING"))
-            conn.commit()
-            buf = create_neon_card(match_name, sport, prob)
-            await context.bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(buf, filename="pred.png"))
-            logger.info(f"Sent prediction: {match_name} [{prob}%]")
-    except Exception:
-        logger.exception("send_hourly_predictions failed.")
+# ---------------- Telegram ----------------
+async def send_prediction(app, prediction):
+    match, sport, prob, mid = prediction[3], prediction[2], prediction[6], prediction[9]
+    card = create_neon_card(title=match, subtitle=sport, prob=prob, footer="StakeDrip Pro")
+    await app.bot.send_photo(chat_id=CHANNEL_ID, photo=InputFile(card), caption=f"🎯 {match}\nTahmin: 1X2\nOlasılık: {prob}%")
 
-async def check_results(context: ContextTypes.DEFAULT_TYPE):
-    # Placeholder: sonuç kontrolü implement edilebilir
-    logger.info("Checking results...")
+# ---------------- Jobs ----------------
+async def job_predictions(app):
+    matches = await collect_upcoming_matches(24)
+    predictions = await generate_predictions(matches)
+    for pred in predictions:
+        cursor.execute("""INSERT INTO results(created_at,date,sport,match,prediction,stake,prob,status,game_id,alt_ust,karsi_gol) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",pred)
+        conn.commit()
+        await send_prediction(app, pred)
+    logger.info("✅ Tahminler gönderildi.")
 
-async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
-    matches = await collect_upcoming_matches(window_hours=24)
-    if not matches:
-        return
-    sel = matches[:5]
-    total_odds = math.prod([prob_to_odd(predict_probability()) for _,_,_,_ in sel])
-    cursor.execute("""
-        INSERT INTO coupons (created_at,date,matches,total_odds,status)
-        VALUES (?,?,?,?,?)
-    """, (utcnow().isoformat(), utcnow().date().isoformat(),
-          ",".join([m[0] for m in sel]), total_odds, "PENDING"))
-    conn.commit()
-    logger.info("Daily coupon created.")
+# ---------------- Bot ----------------
+async def start(update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🚀 StakeDrip Pro aktif!")
 
-# ---------------- HANDLERS ----------------
-async def start(update: ContextTypes.DEFAULT_TYPE, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 StakeDrip Pro Bot aktif!")
-
-async def help_cmd(update: ContextTypes.DEFAULT_TYPE, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Komutlar: /start /yardim /tahmin /kupon /sonuclar /istatistik /trend /surpriz")
-
-async def tahmin(update: ContextTypes.DEFAULT_TYPE, context: ContextTypes.DEFAULT_TYPE):
-    matches = await collect_upcoming_matches(window_hours=24)
-    txt = "\n".join([f"{m[0]} ({m[1]})" for m in matches[:5]]) or "Yaklaşan maç yok."
-    await update.message.reply_text(txt)
-
-# ---------------- REGISTER ----------------
-def register_handlers(app):
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("yardim", help_cmd))
-    app.add_handler(CommandHandler("tahmin", tahmin))
-
-async def schedule_jobs(app):
-    app.job_queue.run_repeating(send_hourly_predictions, interval=3600, first=10)
-    app.job_queue.run_repeating(check_results, interval=300, first=20)
-    app.job_queue.run_repeating(daily_coupon, interval=21600, first=30)
-    logger.info("✅ JobQueue planlandı (tahmin, kupon, sonuç kontrol)")
-
-# ---------------- MAIN ----------------
-def main():
-    logger.info("🚀 StakeDrip Pro başlatılıyor...")
+async def start_bot():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    register_handlers(app)
-    # JobQueue schedule
-    asyncio.create_task(schedule_jobs(app))
-    # Tek event loop ile run
-    app.run_polling()
+    app.add_handler(CommandHandler("start", start))
+    # --- schedule jobs ---
+    async def scheduler():
+        while True:
+            try:
+                await job_predictions(app)
+            except Exception: logger.exception("Job fail")
+            await asyncio.sleep(60*60)
+    asyncio.create_task(scheduler())
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(start_bot())
+    except RuntimeError:
+        logger.exception("❌ Ana uygulama çalışırken hata oluştu.")
