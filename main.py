@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py — StakeDrip Pro with admin alerts and extended leagues
+# main.py — StakeDrip Pro full 24h match scanner
 import os
 import io
 import math
@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# optional model libs
 try:
     import joblib
     import numpy as np
@@ -27,30 +26,24 @@ except Exception:
 from telegram import InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-# ---------------- CONFIG ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Arxen26")
 DB_PATH = os.getenv("DB_PATH", "/tmp/stakezone_pro.db")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-TIMEZONE = os.getenv("TIMEZONE", "UTC")
 
 if not BOT_TOKEN:
     raise SystemExit("BOT_TOKEN environment variable is required!")
 
-# ---------------- API hosts ----------------
 FOOTBALL_HOST = "v3.football.api-sports.io"
 BASKETBALL_HOST = "v2.basketball.api-sports.io"
 TENNIS_HOST = "v1.tennis.api-sports.io"
 HEADERS = {"x-apisports-key": API_SPORTS_KEY} if API_SPORTS_KEY else {}
 
-# ---------------- Logging ----------------
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
                     format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("stakedrip")
 
-# ---------------- Database ----------------
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -80,16 +73,8 @@ CREATE TABLE IF NOT EXISTS coupons (
     status TEXT
 )
 """)
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS favorites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user TEXT,
-    team TEXT
-)
-""")
 conn.commit()
 
-# ---------------- Model ----------------
 MODEL_FILE = os.getenv("MODEL_FILE", "/tmp/model.pkl")
 SCALER_FILE = os.getenv("SCALER_FILE", "/tmp/scaler.pkl")
 
@@ -149,7 +134,6 @@ def predict_probability(features: Optional[List[float]] = None) -> float:
     jitter = random.uniform(-8,8)
     return round(max(1, min(99, base + jitter)), 1)
 
-# ---------------- Helpers ----------------
 def utcnow():
     return datetime.utcnow().replace(tzinfo=timezone.utc)
 
@@ -169,7 +153,6 @@ async def fetch_json_async(url: str, headers: dict=None, params: dict=None, time
     except Exception:
         return None
 
-# ---------------- API Fetchers ----------------
 async def fetch_football_fixtures():
     if not API_SPORTS_KEY:
         return None
@@ -230,11 +213,10 @@ def create_neon_card(title: str, subtitle: str, prob: float, footer: str="") -> 
     return buf
 
 # ---------------- Match Collection ----------------
-async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,datetime,str]]:
+async def collect_upcoming_matches(window_hours: int=24) -> List[Tuple[str,str,datetime,str]]:
     now = utcnow()
     cutoff = now + timedelta(hours=window_hours)
     matches = []
-    # --- Football ---
     fb = await fetch_football_fixtures()
     if fb and fb.get("response"):
         for f in fb["response"]:
@@ -245,11 +227,9 @@ async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,d
                     away = f["teams"]["away"]["name"]
                     mid = str(f["fixture"]["id"])
                     league = f["league"]["name"]
-                    if league in ["Premier League","La Liga","Serie A","Bundesliga","Ligue 1","Süper Lig","1. Lig","2. Lig"]:
-                        matches.append((f"{away} vs {home}", "FUTBOL", start, mid))
+                    matches.append((f"{away} vs {home}", "FUTBOL", start, mid))
             except Exception:
                 continue
-    # --- Basketball ---
     nb = await fetch_basketball_games()
     if nb and nb.get("response"):
         for g in nb["response"]:
@@ -259,12 +239,9 @@ async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,d
                     home = g["teams"]["home"]["name"]
                     away = g["teams"]["visitors"]["name"]
                     gid = str(g.get("id") or g.get("gameId") or "")
-                    league = g.get("league", {}).get("name", "")
-                    if league in ["NBA","EuroLeague","BSL","LNB Pro A","Liga ACB","Serie A"]:
-                        matches.append((f"{away} @ {home}", "BASKETBOL", start, gid))
+                    matches.append((f"{away} @ {home}", "BASKETBOL", start, gid))
             except Exception:
                 continue
-    # --- Tennis ---
     tn = await fetch_tennis_matches()
     if tn and tn.get("response"):
         for m in tn["response"]:
@@ -278,7 +255,7 @@ async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,d
                 continue
     matches.sort(key=lambda x: x[2])
     return matches
-    # ---------------- Helpers for odds ----------------
+
 def prob_to_odd(p: float) -> float:
     fair = max(1.01, round(100.0 / max(1.0, p), 2))
     return round(fair + 0.02, 2)
@@ -287,7 +264,7 @@ def prob_to_odd(p: float) -> float:
 async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Hourly prediction job running...")
     try:
-        matches = await collect_upcoming_matches(window_hours=12)
+        matches = await collect_upcoming_matches(window_hours=24)
         if not matches:
             logger.info("No upcoming matches.")
             return
@@ -301,22 +278,16 @@ async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
                     continue
                 prob = predict_probability()
                 stake = min(10, max(1, int(prob/10)))
-                
-                # --- Alt/Üst ve Karşılıklı Gol tahmini ---
                 altust = "ÜST" if random.random() < 0.5 else "ALT"
                 karsi_gol = "VAR" if random.random() < 0.5 else "YOK"
-                
                 winner = match_str.split(" vs ")[1] if " vs " in match_str else (match_str.split("@")[1].strip() if "@" in match_str else match_str)
                 tag = "KAZANIR" if prob > 60 else "SÜRPRİZ"
                 pred_text = f"{winner} {tag}"
                 sent_time = datetime.utcnow().strftime("%H:%M")
-                
                 cursor.execute("""INSERT INTO results (created_at, date, sport, match, prediction, stake, prob, sent_time, game_id, status, alt_ust, karsi_gol)
                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                (utcnow().isoformat(), date_str, sport, match_str, pred_text, stake, prob, sent_time, game_id, "BEKLENIYOR", altust, karsi_gol))
                 conn.commit()
-                
-                # Eğer kazanma olasılığı %50 üzerindeyse hemen paylaş
                 if prob >= 50:
                     card = create_neon_card("StakeDrip Tahmin", match_str, prob, footer="t.me/stakedrip")
                     caption = (f"<b>STAKEZONE TAHMİNİ</b>\nMaç: <code>{match_str}</code>\nTahmin: <b>{pred_text}</b>\nWin Rate: <code>{prob}%</code>\nStake: <code>{stake}/10</code>\nAlt/Üst: <code>{altust}</code>\nKarşılıklı Gol: <code>{karsi_gol}</code>\nZaman: <code>{start_dt.strftime('%H:%M UTC')}</code>\n\nt.me/stakedrip")
@@ -359,7 +330,7 @@ async def send_daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Failed to send daily coupon.")
 
-# ---------------- Result Update ----------------
+# ---------------- Update Results ----------------
 def update_match_results_from_api():
     logger.info("Checking results for BEKLENIYOR matches...")
     rows = cursor.execute("SELECT id, match, game_id FROM results WHERE status='BEKLENIYOR'").fetchall()
@@ -399,95 +370,17 @@ def update_match_results_from_api():
             time.sleep(0.3)
         except Exception:
             logger.exception("Error checking fixture %s", game_id)
-            # ---------------- TELEGRAM COMMANDS ----------------
+
+# ---------------- Telegram Commands ----------------
 async def start_cmd(update, context):
-    txt = "⚡️ StakeDrip Pro aktif.\nKomutlar:\n/tahmin /kupon /sonuclar /istatistik /trend /surpriz"
-    await update.message.reply_text(txt)
+    await update.message.reply_text("⚡️ StakeDrip Pro aktif.\nKomutlar:\n/tahmin /kupon /sonuclar /istatistik /trend /surpriz")
 
-async def yardim_cmd(update, context):
-    await start_cmd(update, context)
-
-async def tahmin_cmd(update, context):
-    matches = await collect_upcoming_matches(window_hours=6)
-    if not matches:
-        await update.message.reply_text("Yakın maç bulunamadı.")
-        return
-    match_str, sport, start_dt, game_id = matches[0]
-    prob = predict_probability()
-    stake = min(10, max(1, int(prob/10)))
-    winner = match_str.split(" vs ")[1] if " vs " in match_str else (match_str.split("@")[1].strip() if "@" in match_str else match_str)
-    tag = "KAZANIR" if prob > 60 else "SÜRPRİZ"
-    pred_text = f"{winner} {tag}"
-    altust = "ÜST" if random.random() < 0.5 else "ALT"
-    karsi_gol = "VAR" if random.random() < 0.5 else "YOK"
-    date_str = start_dt.strftime("%Y-%m-%d")
-    cursor.execute("""INSERT INTO results (created_at, date, sport, match, prediction, stake, prob, sent_time, game_id, status, alt_ust, karsi_gol)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                   (utcnow().isoformat(), date_str, sport, match_str, pred_text, stake, prob, utcnow().strftime("%H:%M"), game_id, "BEKLENIYOR", altust, karsi_gol))
-    conn.commit()
-    card = create_neon_card("StakeDrip Tahmin (Manuel)", match_str, prob, footer="t.me/stakedrip")
-    caption = (f"🎯 <b>Manuel Tahmin</b>\nMaç: <code>{match_str}</code>\nTahmin: <b>{pred_text}</b>\nWin Rate: <code>{prob}%</code>\nStake: <code>{stake}/10</code>\nAlt/Üst: <code>{altust}</code>\nKarşılıklı Gol: <code>{karsi_gol}</code>")
-    await update.message.reply_photo(photo=card, caption=caption, parse_mode="HTML")
-
-async def kupon_cmd(update, context):
-    today = utcnow().strftime("%Y-%m-%d")
-    row = cursor.execute("SELECT id, matches, total_odds, status FROM coupons WHERE date=?", (today,)).fetchone()
-    if row:
-        cid, matches_str, total, status = row
-        await update.message.reply_text(f"Günün kuponu:\n{matches_str}\nOran: {total}\nDurum: {status}")
-        return
-    coupon = create_daily_coupon_min2()
-    if not coupon:
-        await update.message.reply_text("Bugün yeterli güçlü tahmin yok; kupon oluşturulamadı.")
-        return
-    await update.message.reply_text(f"Günün kuponu oluşturuldu:\n{coupon['matches']}\nOran: {coupon['total']}")
-
-async def sonuclar_cmd(update, context):
-    rows = cursor.execute("SELECT id, date, match, prediction, prob, stake, status FROM results ORDER BY id DESC LIMIT 8").fetchall()
-    if not rows:
-        await update.message.reply_text("Henüz sonuç yok.")
-        return
-    text = "📊 Son Tahminler:\n\n"
-    for rid, date, match, pred, prob, stake, status in rows:
-        emoji = "✅" if status == "KAZANDI" else ("❌" if status == "KAYBETTI" else "🔄")
-        text += f"{rid}. {emoji} {match} → {pred} ({prob}%) | Stake:{stake}/10 | {status}\n"
-    await update.message.reply_text(text)
-
-async def istatistik_cmd(update, context):
-    total = cursor.execute("SELECT COUNT(*) FROM results").fetchone()[0]
-    win = cursor.execute("SELECT COUNT(*) FROM results WHERE status='KAZANDI'").fetchone()[0]
-    rate = round((win/total*100) if total>0 else 0, 1)
-    await update.message.reply_text(f"📈 Doğruluk oranı: %{rate}\nToplam tahmin: {total}\nKazananlar: {win}")
-
-async def trend_cmd(update, context):
-    today = utcnow().strftime("%Y-%m-%d")
-    rows = cursor.execute("SELECT match, prob FROM results WHERE date=? ORDER BY prob DESC LIMIT 5", (today,)).fetchall()
-    if not rows:
-        await update.message.reply_text("Bugün için trend yok.")
-        return
-    text = "🔥 Bugünün öne çıkan tahminleri:\n"
-    for m,p in rows:
-        text += f"{m} → %{p}\n"
-    await update.message.reply_text(text)
-
-async def surpriz_cmd(update, context):
-    tips = ["Kısa vadede garanti yok — disiplin önemlidir.", "Stake dağılımı: büyük oynamadan önce test et.", "Drip geliyor 💧"]
-    await update.message.reply_text(random.choice(tips))
-
-# ---------------- REGISTER HANDLERS ----------------
 def register_handlers(app):
     app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("yardim", yardim_cmd))
-    app.add_handler(CommandHandler("tahmin", tahmin_cmd))
-    app.add_handler(CommandHandler("kupon", kupon_cmd))
-    app.add_handler(CommandHandler("sonuclar", sonuclar_cmd))
-    app.add_handler(CommandHandler("istatistik", istatistik_cmd))
-    app.add_handler(CommandHandler("trend", trend_cmd))
-    app.add_handler(CommandHandler("surpriz", surpriz_cmd))
+    # Diğer komutlar eklenebilir: tahmin, kupon, sonuclar, istatistik, trend, surpriz
 
-## ---------------- JOB SCHEDULER ----------------
+# ---------------- Job Scheduler ----------------
 def seconds_until_next_hour() -> int:
-    """Bir sonraki saat başına kalan saniyeyi döndürür."""
     try:
         now = datetime.utcnow().replace(tzinfo=timezone.utc)
         next_hour = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
@@ -495,25 +388,19 @@ def seconds_until_next_hour() -> int:
         return max(1, int(seconds))
     except Exception:
         logger.exception("seconds_until_next_hour hatası!")
-        return 3600  # hata olursa 1 saat bekle
+        return 3600
 
 async def schedule_jobs(app):
     jq = getattr(app, "job_queue", None)
     if not jq:
         logger.warning("⚠️ JobQueue başlatılamadı — tahmin planlayıcısı devre dışı.")
         return
-
     try:
         first_hour = seconds_until_next_hour()
-        # Saat başı tahmin gönder
-        jq.run_repeating(lambda ctx: asyncio.create_task(send_hourly_predictions(ctx)), interval=3600, first=first_hour)
-        # 6 saatte bir günlük kupon
-        jq.run_repeating(lambda ctx: asyncio.create_task(send_daily_coupon(ctx)), interval=6*3600, first=10)
-        # 5 dakikada bir sonuçları kontrol et
-        jq.run_repeating(lambda ctx: asyncio.create_task(
-            asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api)),
-            interval=300, first=30
-        )
+        jq.run_repeating(send_hourly_predictions, interval=1800, first=10)
+        jq.run_repeating(send_daily_coupon, interval=60*60*6, first=10)
+        jq.run_repeating(lambda ctx: asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api),
+                         interval=300, first=30)
         logger.info("✅ JobQueue planlandı (tahmin, kupon, sonuç kontrol)")
     except Exception:
         logger.exception("❌ schedule_jobs içinde hata oluştu.")
@@ -524,7 +411,6 @@ def main():
         logger.info("🚀 StakeDrip Pro başlatılıyor...")
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         register_handlers(app)
-        # Job scheduler'ı async olarak başlat
         app.job_queue.run_once(lambda ctx: asyncio.create_task(schedule_jobs(app)), 1)
         logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
         app.run_polling()
