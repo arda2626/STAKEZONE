@@ -1,74 +1,47 @@
-import telepot
+import os
+import io
+import asyncio
 import requests
-import schedule
-import time
-import pandas as pd
-import numpy as np
+import joblib
+import sqlite3
 from datetime import datetime, timedelta
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import numpy as np
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
-import joblib
-import os
-import warnings
-import matplotlib.pyplot as plt
-import io
-import sqlite3
-import threading
-from telepot.namedtuple import InlineKeyboardMarkup, InlineKeyboardButton
 
-warnings.filterwarnings("ignore")
+from telegram import InputFile
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# === AYARLAR ===
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8393964009:AAGif15CiCgyXs33VFoF-BnaTUVf8xcMKVE')
-CHANNEL_ID = '@stakedrip'
-RAPIDAPI_KEY = os.getenv('RAPIDAPI_KEY', '8393964009:AAFQslrVuWh8ecoLQhguEdF-BUViI37cFFk')
-NBA_HOST = 'api-nba-v1.p.rapidapi.com'
-FOOTBALL_HOST = 'api-football-v1.p.rapidapi.com'
-DATABASE = '/tmp/stakezone_pro.db'
+# === AYARLAR (Railway: Env vars) ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
+API_KEY = os.getenv("API_SPORTS_KEY")  # "460ec2a..." şeklinde
+NBA_HOST = "v2.nba.api-sports.io"
+FOOTBALL_HOST = "v3.football.api-sports.io"
+HEADERS = {"x-apisports-key": API_KEY}
 
-bot = telepot.Bot(BOT_TOKEN)
+DATABASE = "/tmp/stakezone_pro.db"
 
-# === VERİTABANI ===
+if not BOT_TOKEN:
+    raise SystemExit("BOT_TOKEN missing")
+
+# === DB ===
 conn = sqlite3.connect(DATABASE, check_same_thread=False)
 cursor = conn.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS results (
-    id INTEGER PRIMARY KEY,
-    date TEXT,
-    sport TEXT,
-    match TEXT,
-    prediction TEXT,
-    stake INTEGER,
-    prob REAL,
-    sent_time TEXT,
-    game_id TEXT,
-    result TEXT
-)
-''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS coupons (
-    id INTEGER PRIMARY KEY,
-    date TEXT,
-    matches TEXT,
-    total_odds REAL,
-    status TEXT
-)
-''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    free_until TEXT
-)
-''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS results (id INTEGER PRIMARY KEY, date TEXT, sport TEXT, match TEXT, prediction TEXT, stake INTEGER, prob REAL, sent_time TEXT, game_id TEXT, result TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS coupons (id INTEGER PRIMARY KEY, date TEXT, matches TEXT, total_odds REAL, status TEXT)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, free_until TEXT)''')
 conn.commit()
 
-# === MODEL ===
-MODEL_FILE = '/tmp/model.pkl'
-SCALER_FILE = '/tmp/scaler.pkl'
+# === Basit model (senin model mantığın korunacak) ===
+MODEL_FILE = "/tmp/model.pkl"
+SCALER_FILE = "/tmp/scaler.pkl"
 
-def train_model():
-    print("Model eğitiliyor...")
+def train_dummy_model():
+    if os.path.exists(MODEL_FILE) and os.path.exists(SCALER_FILE):
+        return
     np.random.seed(42)
     data = pd.DataFrame({
         'home_ppg': np.random.uniform(100, 140, 2000),
@@ -77,253 +50,174 @@ def train_model():
         'away_fg': np.random.uniform(38, 53, 2000),
         'home_ats': np.random.randint(0, 20, 2000),
         'away_ats': np.random.randint(0, 20, 2000),
-        'home_win': np.random.choice([0, 1], 2000, p=[0.47, 0.53])
+        'home_win': np.random.choice([0,1], 2000, p=[0.47,0.53])
     })
     X = data.drop('home_win', axis=1)
     y = data['home_win']
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    model = XGBClassifier(n_estimators=300, max_depth=7, learning_rate=0.1, random_state=42)
-    model.fit(X_scaled, y)
+    Xs = scaler.fit_transform(X)
+    model = XGBClassifier(n_estimators=200, max_depth=5, learning_rate=0.1, use_label_encoder=False, eval_metric='logloss')
+    model.fit(Xs, y)
     joblib.dump(model, MODEL_FILE)
     joblib.dump(scaler, SCALER_FILE)
-    print("Model kaydedildi!")
 
-if not os.path.exists(MODEL_FILE):
-    train_model()
-
+train_dummy_model()
 model = joblib.load(MODEL_FILE)
 scaler = joblib.load(SCALER_FILE)
 
-# === MAÇLARI ÇEK ===
-def get_upcoming_matches():
-    matches = []
-    now = datetime.utcnow()
-    window = now + timedelta(hours=12)
+# === API çağrıları (basit) ===
+def fetch_football_today():
+    try:
+        url = f"https://{FOOTBALL_HOST}/fixtures"
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        params = {"date": today}
+        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        return r.json()
+    except Exception as e:
+        return None
 
-    # NBA
+def fetch_nba_today():
     try:
         url = f"https://{NBA_HOST}/games"
-        headers = {'X-RapidAPI-Key': RAPIDAPI_KEY, 'X-RapidAPI-Host': NBA_HOST}
-        res = requests.get(url, headers=headers).json()
-        for g in res.get('response', []):
-            start = datetime.fromisoformat(g['date']['start'].replace('Z', '+00:00'))
-            if now < start < window:
-                matches.append((f"{g['teams']['visitors']['name']} @ {g['teams']['home']['name']}", 'NBA', start, g.get('id')))
-    except: pass
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        params = {"date": today}
+        r = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        return r.json()
+    except Exception as e:
+        return None
 
-    # FUTBOL
-    try:
-        leagues = [39, 140, 135, 78, 61]
-        for lid in leagues:
-            url = f"https://{FOOTBALL_HOST}/v3/fixtures?date={now.strftime('%Y-%m-%d')}&league={lid}&season=2025"
-            headers = {'X-RapidAPI-Key': RAPIDAPI_KEY, 'X-RapidAPI-Host': FOOTBALL_HOST}
-            res = requests.get(url, headers=headers).json()
-            for f in res.get('response', []):
-                start = datetime.fromisoformat(f['fixture']['date'].replace('Z', '+00:00'))
-                if now < start < window:
-                    matches.append((f"{f['teams']['away']['name']} vs {f['teams']['home']['name']}", 'FUTBOL', start, f['fixture']['id']))
-    except: pass
-
-    matches.sort(key=lambda x: x[2])
-    return matches
-
-# === TAHMİN ===
+# === Tahmin (dummy) ===
 def predict():
-    features = np.array([[118, 112, 47.5, 45.2, 9, 7]])
-    X_scaled = scaler.transform(features)
-    prob = model.predict_proba(X_scaled)[0][1] * 100
-    return round(prob, 1)
+    features = np.array([[118,112,47.5,45.2,9,7]])
+    Xs = scaler.transform(features)
+    prob = model.predict_proba(Xs)[0][1]*100
+    return round(prob,1)
 
-# === GRAFİK ===
-def create_graph(prob):
-    fig, ax = plt.subplots(figsize=(6, 2), facecolor='none')
-    ax.barh(0, prob, color='#00ff88', height=0.6)
-    ax.barh(0, 100 - prob, left=prob, color='#ff4444', height=0.6)
-    ax.text(prob/2, 0.3, f"{prob}%", color='black', fontsize=12, fontweight='bold', ha='center')
-    ax.text(prob + (100-prob)/2, 0.3, f"{100-prob}%", color='white', fontsize=12, fontweight='bold', ha='center')
-    ax.axis('off')
+# === Görsel oluştur (neon-stil basit) ===
+def create_neon_banner(title, subtitle, prob):
+    W, H = 1200, 480
+    bg = Image.new("RGBA", (W,H), (8,8,12,255))
+
+    draw = ImageDraw.Draw(bg)
+    # font (Railway: sunucuda uygun bir font yoksa repo'ya ttf koy)
+    try:
+        font_big = ImageFont.truetype("arial.ttf", 72)
+        font_med = ImageFont.truetype("arial.ttf", 36)
+    except:
+        font_big = ImageFont.load_default()
+        font_med = ImageFont.load_default()
+
+    # neon glow: dibine blur'lu yazı katmanı ekle
+    txt = Image.new("RGBA", (W,H), (0,0,0,0))
+    d2 = ImageDraw.Draw(txt)
+    x = 60
+    y = 60
+    # glow katmanları
+    for offset,alpha in [(12,25),(8,60),(4,140)]:
+        d2.text((x+offset, y+offset), title, font=font_big, fill=(40,160,255,alpha))
+    d2.text((x, y), title, font=font_big, fill=(180,240,255,255))
+
+    # alt yazı
+    sy = y + 120
+    d2.text((x, sy), subtitle, font=font_med, fill=(200,180,255,255))
+
+    # prob bar
+    bar_x, bar_y = x, H - 120
+    bar_w = 800
+    filled = int(bar_w * (prob/100))
+    d2.rectangle([bar_x, bar_y, bar_x+filled, bar_y+30], fill=(0,255,180,255))
+    d2.rectangle([bar_x+filled, bar_y, bar_x+bar_w, bar_y+30], fill=(255,80,80,200))
+    d2.text((bar_x + bar_w + 20, bar_y), f"{prob}%", font=font_med, fill=(230,230,230,255))
+
+    # glow blur
+    glow = txt.filter(ImageFilter.GaussianBlur(4))
+    combined = Image.alpha_composite(bg, glow)
+    combined = Image.alpha_composite(combined, txt)
+
     buf = io.BytesIO()
-    plt.savefig(buf, format='png', transparent=True, bbox_inches='tight', pad_inches=0)
+    combined.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
-    plt.close()
     return buf
 
-# === DOĞRULUK ORANI ===
-def get_accuracy():
-    cursor.execute("SELECT COUNT(*) FROM results WHERE result = 'KAZANDI'")
-    win = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM results WHERE result IS NOT NULL")
-    total = cursor.fetchone()[0]
-    return round((win / total * 100) if total > 0 else 82.1, 1)
-
-# === RENKLİ TAHMİN (HTML + Emoji) ===
-def send_prediction():
-    matches = get_upcoming_matches()
-    if not matches:
-        return
+# === Gönderim fonksiyonu (her saat başı çalıştırılacak) ===
+async def send_hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
     now = datetime.utcnow()
-    for match, sport, start, game_id in matches:
-        if start - now <= timedelta(minutes=35) and start - now > timedelta(minutes=25):
-            sent = cursor.execute("SELECT 1 FROM results WHERE match = ? AND date = ?", (match, start.strftime('%Y-%m-%d'))).fetchone()
-            if not sent:
-                prob = predict()
-                stake = min(10, max(1, int(prob / 10)))
-                home = match.split(" @ ")[1] if sport == 'NBA' else match.split(" vs ")[1]
-                win_team = home if prob > 60 else (match.split(" @ ")[0] if sport == 'NBA' else match.split(" vs ")[0])
-                pred_emoji = "KAZANIR" if prob > 60 else "SÜRPRİZ"
-                time_str = start.strftime('%H:%M')
-
-                report = f"""
-<b><span style="color:#FFD700">STAKEZONE TAHMİNİ</span></b>
-<span style="color:#00FF00">Maç:</span> <code>{match}</code>
-<span style="color:#00FF00">Tahmin:</span> <b><span style="color:#32CD32">{win_team} {pred_emoji}</span></b>
-<span style="color:#FFA500">Win Rate:</span> <code>{prob}%</code>
-<span style="color:#00BFFF">Stake:</span> <code>{stake}/10</code>
-<span style="color:#FF4500">Doğruluk:</span> <code>%{get_accuracy()}</code>
-<span style="color:#1E90FF">Zaman:</span> <code>{time_str} UTC</code>
-
-t.me/stakedrip
-#NBA #Futbol #Stake
-                """
-                try:
-                    graph = create_graph(prob)
-                    bot.sendPhoto(CHANNEL_ID, graph, caption=report, parse_mode='HTML')
-                    print(f"STAKEZONE: Tahmin gönderildi → {match}")
-                    cursor.execute("INSERT INTO results (date, sport, match, prediction, stake, prob, sent_time, game_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                                  (start.strftime('%Y-%m-%d'), sport, match, f"{win_team} {pred_emoji}", stake, prob, time_str, game_id))
-                    conn.commit()
-                except Exception as e:
-                    print(f"Hata: {e}")
-                break
-
-# === GÜNLÜK KUPON ===
-def create_daily_coupon():
-    today = datetime.now().strftime('%Y-%m-%d')
-    cursor.execute("SELECT match, prob FROM results WHERE date = ? AND prob > 65", (today,))
-    high = cursor.fetchall()
-    if len(high) < 2:
+    # maç çek (örnek amaçlı; burada kendi mantığını ekle)
+    fb = fetch_football_today()
+    nba = fetch_nba_today()
+    # Basit: eğer maç varsa, örnek bir match al
+    match_title = "No Match Found"
+    sport = None
+    if fb and fb.get('response'):
+        f = fb['response'][0]
+        match_title = f"{f['teams']['away']['name']} vs {f['teams']['home']['name']}"
+        sport = "FUTBOL"
+        start = f['fixture']['date']
+    elif nba and nba.get('response'):
+        g = nba['response'][0]
+        match_title = f"{g['teams']['visitors']['name']} @ {g['teams']['home']['name']}"
+        sport = "NBA"
+        start = g.get('date')
+    else:
+        # eğer maç yok, yine de bilgi atabiliriz ya da return
         return
-    high.sort(key=lambda x: x[1], reverse=True)
-    selected = high[:3]
-    odds = [round(1.8 + (p-65)/15, 2) for _, p in selected]
-    total = round(np.prod(odds), 2)
-    if total >= 2.0:
-        matches_str = " | ".join([m for m, _ in selected])
-        cursor.execute("INSERT INTO coupons (date, matches, total_odds, status) VALUES (?, ?, ?, ?)",
-                      (today, matches_str, total, 'BEKLENİYOR'))
-        conn.commit()
-        report = f"""
-<b><span style="color:#FFD700">GÜNLÜK KUPON</span></b>
-<code>{matches_str}</code>
-<span style="color:#00FF00">Toplam Oran:</span> <code>{total}</code>
-<span style="color:#32CD32">Tahminler: XGBoost %65+</span>
 
-t.me/stakedrip
-#Kupon
-        """
-        bot.sendMessage(CHANNEL_ID, report, parse_mode='HTML')
+    prob = predict()
+    stake = min(10, max(1, int(prob/10)))
+    win_team = match_title.split(" vs ")[1] if sport == "FUTBOL" and " vs " in match_title else match_title.split(" @ ")[1] if "@" in match_title else match_title
+    prediction_text = f"{win_team} {'KAZANIR' if prob>60 else 'SÜRPRİZ'}"
 
-# === KUPON KAZANDI BİLDİRİMİ ===
-def check_coupon_results():
-    today = datetime.now().strftime('%Y-%m-%d')
-    cursor.execute("SELECT id, matches, total_odds FROM coupons WHERE date = ? AND status = 'BEKLENİYOR'", (today,))
-    for cid, matches, odds in cursor.fetchall():
-        match_list = matches.split(" | ")
-        wins = 0
-        for m in match_list:
-            row = cursor.execute("SELECT result FROM results WHERE match = ? AND date = ?", (m, today)).fetchone()
-            if row and row[0] == 'KAZANDI':
-                wins += 1
-        if wins == len(match_list):
-            cursor.execute("UPDATE coupons SET status = 'KAZANDI' WHERE id = ?", (cid,))
-            conn.commit()
-            msg = f"""
-<b><span style="color:#32CD32">KUPON KAZANDI!</span></b>
-<span style="color:#FFD700">3/3 DOĞRU!</span>
-<code>{matches}</code>
-<span style="color:#00FF00">Toplam Oran:</span> <code>{odds}</code>
-<span style="color:#FF69B4">Kazanç:</span> <code>+{round(odds * 100 - 100, 0)} TL</code>
-
-#KuponKazandi #Stake
-            """
-            bot.sendMessage(CHANNEL_ID, msg, parse_mode='HTML')
-
-# === GOL BİLDİRİMİ ===
-def check_live_goals():
-    cursor.execute("SELECT match, game_id FROM results WHERE result IS NULL AND sport = 'FUTBOL'")
-    for match, game_id in cursor.fetchall():
-        if not game_id:
-            continue
-        try:
-            url = f"https://{FOOTBALL_HOST}/v3/fixtures?id={game_id}"
-            headers = {'X-RapidAPI-Key': RAPIDAPI_KEY, 'X-RapidAPI-Host': FOOTBALL_HOST}
-            res = requests.get(url, headers=headers).json()
-            events = res['response'][0]['events']
-            for e in events:
-                if e['type'] == 'Goal' and e.get('detail') == 'Normal Goal':
-                    player = e['player']['name']
-                    team = e['team']['name']
-                    minute = e['time']['elapsed']
-                    score = f"{res['response'][0]['goals']['home']} - {res['response'][0]['goals']['away']}"
-                    msg = f"""
-<b><span style="color:#FF4500">GOL ANI!</span></b>
-<code>{match}</code>
-<span style="color:#32CD32"><b>{player} GOL ATTI!</b></span>
-<span style="color:#00BFFF">Skor:</span> <code>{score}</code>
-<span style="color:#FFD700">Dakika:</span> <code>{minute}'</code>
-
-#Canli #Futbol
-                    """
-                    bot.sendMessage(CHANNEL_ID, msg, parse_mode='HTML')
-        except: pass
-
-# === KOMUTLAR ===
-def handle_message(msg):
-    content_type, _, chat_id = telepot.glance(msg)
-    if content_type != 'text': return
-    text = msg['text'].strip().lower()
-    username = msg.get('from', {}).get('username', 'Bilinmeyen')
-
-    cursor.execute("INSERT OR IGNORE INTO users (user_id, username, free_until) VALUES (?, ?, ?)",
-                  (chat_id, username, (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d')))
+    # DB kayıt
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+    time_str = datetime.utcnow().strftime("%H:%M")
+    cursor.execute("INSERT INTO results (date, sport, match, prediction, stake, prob, sent_time, game_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  (date_str, sport or "GENEL", match_title, prediction_text, stake, prob, time_str, None))
     conn.commit()
 
-    if text == '/start':
-        bot.sendMessage(chat_id, "*STAKEZONE PRO*\n\n30 gün ücretsiz!\n\nKomutlar:\n/bugun - Bugünkü tahminler\n/stats - Performans\n/kupon - Günlük kupon", parse_mode='Markdown')
-    elif text == '/bugun':
-        today = datetime.now().strftime('%Y-%m-%d')
-        cursor.execute("SELECT match, prediction, prob, stake FROM results WHERE date = ?", (today,))
-        rows = cursor.fetchall()
-        if rows:
-            msg = "**BUGÜNKÜ TAHMİNLER**\n\n"
-            for m, p, pr, s in rows:
-                msg += f"`{m}` → {p} ({pr}%) | Stake: {s}/10\n"
-            bot.sendMessage(chat_id, msg, parse_mode='Markdown')
-        else:
-            bot.sendMessage(chat_id, "Henüz tahmin yok.")
-    elif text == '/stats':
-        bot.sendMessage(chat_id, f"**DOĞRULUK ORANI:** %{get_accuracy()}\nToplam tahmin: {cursor.execute('SELECT COUNT(*) FROM results').fetchone()[0]}", parse_mode='Markdown')
-    elif text == '/kupon':
-        today = datetime.now().strftime('%Y-%m-%d')
-        row = cursor.execute("SELECT matches, total_odds, status FROM coupons WHERE date = ?", (today,)).fetchone()
-        if row:
-            bot.sendMessage(chat_id, f"**GÜNLÜK KUPON**\n\n`{row[0]}`\nOran: {row[1]}\nDurum: {row[2]}", parse_mode='Markdown')
-        else:
-            bot.sendMessage(chat_id, "Bugün kupon yok.")
+    # görsel oluştur
+    banner = create_neon_banner("StakeDrip Tahmin", match_title, prob)
 
-# === ZAMANLAMA ===
-def run_scheduler():
-    schedule.every().hour.do(send_prediction)
-    schedule.every(2).hours.do(create_daily_coupon)
-    schedule.every(30).minutes.do(check_coupon_results)
-    schedule.every(5).minutes.do(check_live_goals)
-    while True:
-        schedule.run_pending()
-        time.sleep(60)
+    caption = f"<b>STAKEZONE TAHMİNİ</b>\nMaç: <code>{match_title}</code>\nTahmin: <b>{prediction_text}</b>\nWin Rate: <code>{prob}%</code>\nStake: <code>{stake}/10</code>\n\nt.me/stakedrip"
+    try:
+        await context.bot.send_photo(CHANNEL_ID, photo=InputFile(banner, filename="prob.png"), caption=caption, parse_mode="HTML")
+        print("Tahmin gönderildi:", match_title, prob)
+    except Exception as e:
+        print("Gönderim hatası:", e)
 
-# === ANA BAŞLATMA ===
-if __name__ == '__main__':
-    print("STAKEZONE PRO BAŞLADI! (Tüm Özellikler Aktif)")
-    threading.Thread(target=run_scheduler, daemon=True).start()
-    bot.message_loop({'chat': handle_message})
+# === Komutlar ===
+async def start(update, context):
+    await context.bot.send_message(update.effective_chat.id, "StakeDrip Bot aktif. Otomatik tahminler saat başı gönderilecek.")
+
+async def bugun(update, context):
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    rows = cursor.execute("SELECT match, prediction, prob, stake FROM results WHERE date = ?", (today,)).fetchall()
+    if rows:
+        text = ""
+        for m,p,pr,s in rows:
+            text += f"{m} → {p} ({pr}%) | Stake {s}/10\n"
+        await context.bot.send_message(update.effective_chat.id, text)
+    else:
+        await context.bot.send_message(update.effective_chat.id, "Bugün tahmin yok.")
+
+# === MAIN ===
+async def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("bugun", bugun))
+
+    # JobQueue: saat başı (her 3600 saniyede bir), ama first param ile align etmeyiz.
+    # Railway'de çalıştırırken process uyanık kalırsa bu yeterli. Daha kesin align istersen
+    # aşağıdaki mantıkla “tam saat başı” olarak ayarlanabilir.
+    jq = app.job_queue
+    # ilk çalışmayı hemen yap
+    jq.run_repeating(send_hourly_prediction, interval=3600, first=10)
+
+    print("Bot çalışıyor...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
