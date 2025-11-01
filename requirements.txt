@@ -1,9 +1,10 @@
-telepot
+python-telegram-bot==20.5
 requests
-schedule
-pandas
+joblib
 numpy
+pandas
 scikit-learn
 xgboost
-joblib
 matplotlib
+pillow
+sqlite3   # not necessary in requirements, python builtin
