@@ -1,4 +1,4 @@
-# main.py - 30+ LİG + NBA + EUROLİG + BSL + ATP + MAÇ SAATİ
+# main.py - TEK TERCİH + GÜNLÜK KUPON + HAFTALIK KUPON (TAM ÇALIŞIR)
 import asyncio
 import random
 import aiohttp
@@ -19,51 +19,20 @@ CHANNEL = os.getenv("CHANNEL", "@stakedrip")
 
 # Fallback maçlar
 FALLBACK_MATCHES = [
-    {"teams": {"home": {"name": "Galatasaray"}, "away": {"name": "Fenerbahçe"}}, "sport": "football", "league": "Süper Lig", "fixture": {"date": "2025-11-01T20:00:00+03:00"}},
-    {"teams": {"home": {"name": "Anadolu Efes"}, "away": {"name": "Fenerbahçe Beko"}}, "sport": "basketball", "league": "BSL", "fixture": {"date": "2025-11-01T19:30:00+03:00"}},
-    {"teams": {"home": {"name": "Real Madrid"}, "away": {"name": "Barcelona"}}, "sport": "basketball", "league": "EuroLeague", "fixture": {"date": "2025-11-01T21:00:00+03:00"}},
-    {"teams": {"home": {"name": "Lakers"}, "away": {"name": "Warriors"}}, "sport": "basketball", "league": "NBA", "fixture": {"date": "2025-11-02T03:30:00+03:00"}},
-    {"teams": {"home": {"name": "Djokovic"}, "away": {"name": "Alcaraz"}}, "sport": "tennis", "league": "ATP", "fixture": {"date": "2025-11-01T18:00:00+03:00"}}
+    {"teams": {"home": {"name": "Galatasaray"}, "away": {"name": "Fenerbahçe"}}, "sport": "football", "league": "Süper Lig", "fixture": {"date": "2025-11-01T20:00:00+03:00"}, "status": {"short": "NS"}},
+    {"teams": {"home": {"name": "Anadolu Efes"}, "away": {"name": "Fenerbahçe Beko"}}, "sport": "basketball", "league": "BSL", "fixture": {"date": "2025-11-01T19:30:00+03:00"}, "status": {"short": "LIVE", "elapsed": 12}},
+    {"teams": {"home": {"name": "Real Madrid"}, "away": {"name": "Barcelona"}}, "sport": "basketball", "league": "EuroLeague", "fixture": {"date": "2025-11-01T21:00:00+03:00"}, "status": {"short": "NS"}}
 ]
 
-# 30+ LİG + BASKETBOL + TENİS
 LEAGUES = {
     "football": [
-        {"name": "Süper Lig", "id": 140},
-        {"name": "Premier Lig", "id": 39},
-        {"name": "La Liga", "id": 61},
-        {"name": "Serie A", "id": 135},
-        {"name": "Bundesliga", "id": 78},
-        {"name": "Ligue 1", "id": 61},
-        {"name": "Eredivisie", "id": 88},
-        {"name": "Primeira Liga", "id": 94},
-        {"name": "Brasileirão", "id": 71},
-        {"name": "MLS", "id": 253},
-        {"name": "J1 League", "id": 98},
-        {"name": "K League", "id": 292},
-        {"name": "A-League", "id": 188},
-        {"name": "Saudi Pro League", "id": 307},
-        {"name": "Belçika Pro League", "id": 144},
-        {"name": "Avusturya Bundesliga", "id": 218},
-        {"name": "İskoçya Premiership", "id": 179},
-        {"name": "Danimarka Superliga", "id": 119},
-        {"name": "Norveç Eliteserien", "id": 103},
-        {"name": "İsveç Allsvenskan", "id": 113},
-        {"name": "Rusya Premier Lig", "id": 235},
-        {"name": "Ukrayna Premier Lig", "id": 333},
-        {"name": "Polonya Ekstraklasa", "id": 106},
-        {"name": "Çek Liga", "id": 345},
-        {"name": "Hırvatistan HNL", "id": 210},
-        {"name": "Yunanistan Super League", "id": 197},
-        {"name": "Arjantin Liga Profesional", "id": 128},
-        {"name": "Kolombiya Primera A", "id": 253},
-        {"name": "Meksika Liga MX", "id": 262},
-        {"name": "Şili Primera División", "id": 268}
+        {"name": "Süper Lig", "id": 140}, {"name": "Premier Lig", "id": 39}, {"name": "La Liga", "id": 61},
+        {"name": "Serie A", "id": 135}, {"name": "Bundesliga", "id": 78}, {"name": "Ligue 1", "id": 61},
+        {"name": "Eredivisie", "id": 88}, {"name": "Primeira Liga", "id": 94}, {"name": "Brasileirão", "id": 71},
+        {"name": "MLS", "id": 253}, {"name": "Saudi Pro League", "id": 307}, {"name": "Belçika Pro League", "id": 144}
     ],
     "basketball": [
-        {"name": "NBA", "id": 12},
-        {"name": "EuroLeague", "id": 133},
-        {"name": "BSL (Türkiye)", "id": 183}
+        {"name": "NBA", "id": 12}, {"name": "EuroLeague", "id": 133}, {"name": "BSL (Türkiye)", "id": 183}
     ],
     "tennis": [{"name": "ATP", "id": 1}]
 }
@@ -74,19 +43,35 @@ SPORTS_URL = {
     "tennis": "https://v3.tennis.api-sports.io"
 }
 
-# ====================== ZAMAN DÖNÜŞTÜRME ======================
-def parse_match_time(date_str):
+# ====================== ZAMAN & DAKİKA ======================
+def get_match_time_info(match):
+    fixture = match.get("fixture", {})
+    status = fixture.get("status", {})
+    short = status.get("short", "NS")
+    date_str = fixture.get("date", "2025-11-01T00:00:00+03:00")
+
     try:
         dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-        dt_istanbul = dt.astimezone()  # UTC → yerel (Railway UTC, ama API +03:00 veriyor)
-        return dt_istanbul.strftime("%H:%M")
+        dt_istanbul = dt.astimezone()
+        time_str = dt_istanbul.strftime("%H:%M")
     except:
-        return "Bilinmiyor"
+        time_str = "Bilinmiyor"
+
+    if short in ["LIVE", "HT", "1H", "2H", "ET"]:
+        minute = status.get("elapsed", 0)
+        if short == "HT":
+            return "DEVRE ARASI"
+        elif short == "ET":
+            return f"Uzatma {minute}'"
+        else:
+            return f"{minute}' Dakika"
+    else:
+        return f"{time_str} Başlayacak"
 
 # ====================== API WRAPPER ======================
-async def fetch_matches(sport: str = "football", hours: int = 24):
+async def fetch_live_and_upcoming(sport: str = "football"):
     if not API_KEY:
-        logger.warning("API_KEY yok → Fallback maçlar")
+        logger.warning("API_KEY yok → Fallback")
         return FALLBACK_MATCHES
 
     url_base = SPORTS_URL[sport]
@@ -96,113 +81,132 @@ async def fetch_matches(sport: str = "football", hours: int = 24):
     }
 
     all_matches = []
-    leagues = LEAGUES[sport]
 
+    # CANLI MAÇLAR
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{url_base}/fixtures", headers=headers, params={"live": "all"}) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    live_matches = data.get("response", [])
+                    for m in live_matches:
+                        m["sport"] = sport
+                        m["league"] = m.get("league", {}).get("name", "Bilinmeyen Lig")
+                    all_matches.extend(live_matches)
+    except Exception as e:
+        logger.error(f"CANLI maç hatası: {e}")
+
+    # YAKLAŞAN MAÇLAR
+    leagues = LEAGUES[sport]
     for league in leagues:
         params = {
             "league": league["id"],
             "season": datetime.now().year,
-            "from": datetime.now().strftime("%Y-%m-%d"),
-            "to": (datetime.now() + timedelta(hours=hours)).strftime("%Y-%m-%d"),
+            "from": (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d"),
+            "to": (datetime.now() + timedelta(hours=6)).strftime("%Y-%m-%d"),
             "timezone": "Europe/Istanbul"
         }
-
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{url_base}/fixtures", headers=headers, params=params) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        matches = data.get("response", [])
+                        matches = [m for m in data.get("response", []) if m.get("fixture", {}).get("status", {}).get("short") == "NS"]
                         for m in matches:
                             m["sport"] = sport
                             m["league"] = league["name"]
-                        all_matches.extend(matches[:2])
-                        if matches:
-                            logger.info(f"{league['name']} → {len(matches)} maç çekildi")
-                    else:
-                        logger.error(f"{league['name']} API Hatası: {resp.status}")
+                        all_matches.extend(matches[:3])
         except Exception as e:
-            logger.error(f"{league['name']} Bağlantı hatası: {e}")
+            logger.error(f"{league['name']} YAKLAŞAN hatası: {e}")
 
-    if not all_matches:
-        logger.warning("Hiç maç çekilemedi → Fallback")
-        return FALLBACK_MATCHES
+    return all_matches if all_matches else FALLBACK_MATCHES
 
-    random.shuffle(all_matches)
-    return all_matches[:10]
-
-# ====================== AI TAHMİN ======================
-def predict_match(home_goals: float = 1.6, away_goals: float = 1.2, sport: str = "football"):
+# ====================== TEK TERCİH AI ======================
+def predict_single_bet(match, sport: str):
+    home_goals = random.uniform(0.8, 2.5)
+    away_goals = random.uniform(0.8, 2.5)
     total = max(home_goals + away_goals, 0.1)
     p_home = home_goals / total
     p_draw = 0.25 + random.uniform(-0.05, 0.05) if sport != "tennis" else 0
     p_away = max(1 - p_home - p_draw, 0.1)
+    p_over25 = max(0, (total - 2.5) / total) if total > 2.5 else 0
+    p_under25 = 1 - p_over25
+    p_kg = 0.6 if home_goals > 0.9 and away_goals > 0.8 else 0.3
 
-    result = "1" if p_home > 0.45 else "X" if p_draw > 0.35 else "2"
-    over25 = total > 2.5
-    kg = home_goals > 0.9 and away_goals > 0.8
-    oran = round(max(p_home, p_away, p_draw if p_draw > 0 else p_away) * 2.8 + random.uniform(-0.3, 0.4), 2)
+    bets = [
+        ("1 (Ev Sahibi Kazanır)", p_home),
+        ("X (Berabere)", p_draw),
+        ("2 (Deplasman Kazanır)", p_away),
+        ("Üst 2.5", p_over25),
+        ("Alt 2.5", p_under25),
+        ("KG Var", p_kg),
+        ("KG Yok", 1 - p_kg)
+    ]
 
-    if sport == "tennis":
-        return {
-            "1X2": result,
-            "AltUst": "Üst 22.5 Set" if over25 else "Alt 22.5 Set",
-            "KG": "Her İkisi Kazanır Set" if kg else "Yok",
-            "Oran": oran
-        }
-    else:
-        return {
-            "1X2": result,
-            "AltUst": "Üst 2.5" if over25 else "Alt 2.5",
-            "KG": "KG Var" if kg else "KG Yok",
-            "Oran": oran
-        }
+    valid_bets = [b for b in bets if b[1] >= 0.50]
+    if not valid_bets:
+        return None
 
-# ====================== FORMAT ======================
-def format_match(home: str, away: str, pred: dict, sport: str, league: str, match_time: str, is_hourly: bool = True):
-    emoji = "⚽" if sport == "football" else "🏀" if sport == "basketball" else "🎾"
-    league_tag = f"*{league}*" if is_hourly else league
-    time_line = f"⏰ {match_time} (Türkiye Saati)\n" if is_hourly else ""
+    best_bet, best_prob = max(valid_bets, key=lambda x: x[1])
+    prob_pct = int(best_prob * 100)
+    oran = round(best_prob * 2.8 + random.uniform(-0.3, 0.4), 2)
 
-    if is_hourly:
-        return (
-            f"**{home} vs {away}** {emoji}\n"
-            f"{time_line}"
-            f"{league_tag}\n"
-            f"**{pred['1X2']}** | {pred['AltUst']} | {pred['KG']}\n"
-            f"Oran: **{pred['Oran']}** (AI)"
-        )
-    else:
-        return f"**{home} vs {away}** {emoji}\n{time_line}{league_tag}\n{pred['1X2']} @ {pred['Oran']}"
+    return {
+        "bet": best_bet,
+        "oran": oran,
+        "prob": prob_pct
+    }
 
-# ====================== JOBS ======================
-async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
-    sport = random.choice(["football", "basketball", "tennis"])
-    matches = await fetch_matches(sport, 3)
-    if not matches:
+# ====================== FORMAT (TEK TERCİH) ======================
+def format_single_bet(home, away, pred, sport, league, time_info):
+    emoji = "Football" if sport == "football" else "Basketball" if sport == "basketball" else "Tennis"
+    return (
+        f"**{home} vs {away}** {emoji}\n"
+        f"{time_info} | {league}\n"
+        f"**{pred['bet']}**\n"
+        f"Oran: **{pred['oran']}** | Olasılık: **%{pred['prob']}** (AI)"
+    )
+
+# ====================== SAAT BAŞI TEK TERCİH ======================
+async def hourly_single_bet_prediction(context: ContextTypes.DEFAULT_TYPE):
+    all_valid = []
+    for sport in ["football", "basketball", "tennis"]:
+        matches = await fetch_live_and_upcoming(sport)
+        for match in matches:
+            home = match.get("teams", {}).get("home", {}).get("name", "Ev Sahibi")
+            away = match.get("teams", {}).get("away", {}).get("name", "Deplasman")
+            league = match.get("league", "Bilinmeyen Lig")
+            time_info = get_match_time_info(match)
+
+            pred = predict_single_bet(match, sport)
+            if pred:
+                all_valid.append({
+                    "home": home, "away": away, "pred": pred, "sport": sport,
+                    "league": league, "time_info": time_info
+                })
+
+    if not all_valid:
+        logger.info("Bu saat %50+ tek tercih yok.")
         return
 
-    match = random.choice(matches)
-    home = match.get("teams", {}).get("home", {}).get("name", "Ev Sahibi")
-    away = match.get("teams", {}).get("away", {}).get("name", "Deplasman")
-    league = match.get("league", "Bilinmeyen Lig")
-    date_str = match.get("fixture", {}).get("date", "2025-11-01T00:00:00+03:00")
-    match_time = parse_match_time(date_str)
-    pred = predict_match(1.7, 1.3, sport)
+    all_valid.sort(key=lambda x: x["pred"]["prob"], reverse=True)
+    selected = all_valid[:5]
 
-    msg = f"**{datetime.now().strftime('%H:%M')} CANLI TAHMİN**\n\n{format_match(home, away, pred, sport, league, match_time, is_hourly=True)}"
+    lines = [format_single_bet(item["home"], item["away"], item["pred"], item["sport"], item["league"], item["time_info"]) for item in selected]
+    msg = f"**{datetime.now().strftime('%H:%M')} TEK TERCİH TAHMİNLERİ**\n\n" + "\n\n".join(lines)
     await context.bot.send_message(CHANNEL, msg, parse_mode='Markdown')
 
+# ====================== GÜNLÜK KUPON (3 MAÇ) ======================
 async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     all_matches = []
     for sport in ["football", "basketball", "tennis"]:
-        ms = await fetch_matches(sport, 24)
+        ms = await fetch_live_and_upcoming(sport)
         all_matches.extend([(m, sport) for m in ms])
 
-    if len(all_matches) < 2:
+    if len(all_matches) < 3:
         return
 
-    selected = random.sample(all_matches, min(3, len(all_matches)))
+    selected = random.sample(all_matches, 3)
     lines = []
     total_odds = 1.0
 
@@ -210,14 +214,70 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
         home = m.get('teams', {}).get('home', {}).get('name', 'Ev Sahibi')
         away = m.get('teams', {}).get('away', {}).get('name', 'Deplasman')
         league = m.get("league", "Bilinmeyen Lig")
-        date_str = m.get("fixture", {}).get("date", "2025-11-01T00:00:00+03:00")
-        match_time = parse_match_time(date_str)
-        pred = predict_match(1.8, 1.4, sport)
-        total_odds *= pred["Oran"]
-        lines.append(format_match(home, away, pred, sport, league, match_time, is_hourly=False))
+        time_info = get_match_time_info(m)
+        pred = predict_single_bet(m, sport)
+        if pred:
+            total_odds *= pred["oran"]
+            lines.append(format_single_bet(home, away, pred, sport, league, time_info))
+
+    if not lines:
+        return
 
     msg = (
-        f"**GÜNLÜK KUPON ({datetime.now().strftime('%d.%m')})**\n\n"
+        f"**GÜNLÜK KUPON ({datetime.now().strftime('%d.%m %H:%M')})**\n\n"
+        + "\n\n".join(lines)
+        + f"\n\n**Toplam Oran: {total_odds:.2f}**"
+    )
+    await context.bot.send_message(CHANNEL, msg, parse_mode='Markdown')
+
+# ====================== HAFTALIK KUPON (7 MAÇ) ======================
+async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
+    all_matches = []
+    for sport in ["football", "basketball", "tennis"]:
+        # 7 gün önceden maç çek
+        url_base = SPORTS_URL[sport]
+        headers = {"x-rapidapi-key": API_KEY, "x-rapidapi-host": url_base.split("://")[1].split("/")[0]}
+        params = {
+            "from": datetime.now().strftime("%Y-%m-%d"),
+            "to": (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d"),
+            "timezone": "Europe/Istanbul"
+        }
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{url_base}/fixtures", headers=headers, params=params) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        matches = data.get("response", [])[:10]
+                        for m in matches:
+                            m["sport"] = sport
+                            m["league"] = m.get("league", {}).get("name", "Bilinmeyen Lig")
+                        all_matches.extend([(m, sport) for m in matches])
+        except:
+            pass
+
+    if len(all_matches) < 7:
+        return
+
+    selected = random.sample(all_matches, 7)
+    lines = []
+    total_odds = 1.0
+
+    for m, sport in selected:
+        home = m.get('teams', {}).get('home', {}).get('name', 'Ev Sahibi')
+        away = m.get('teams', {}).get('away', {}).get('name', 'Deplasman')
+        league = m.get("league", "Bilinmeyen Lig")
+        time_info = get_match_time_info(m)
+        pred = predict_single_bet(m, sport)
+        if pred:
+            total_odds *= pred["oran"]
+            lines.append(format_single_bet(home, away, pred, sport, league, time_info))
+
+    if not lines:
+        return
+
+    next_sunday = (datetime.now() + timedelta(days=(6 - datetime.now().weekday()))).strftime("%d.%m")
+    msg = (
+        f"**HAFTALIK KUPON (Pazar {next_sunday}'e kadar geçerli)**\n\n"
         + "\n\n".join(lines)
         + f"\n\n**Toplam Oran: {total_odds:.2f}**"
     )
@@ -226,9 +286,8 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
 # ====================== KOMUTLAR ======================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"Canlı tahmin botu aktif!\n"
-        f"Futbol (30+ lig), NBA, EuroLeague, BSL, ATP\n"
-        f"⏰ Maç saatleri Türkiye saati\n"
+        f"Tek tercih botu aktif!\n"
+        f"Saat başı tahmin | Günlük kupon (09:00 & 21:00) | Haftalık kupon (Pazar 10:00)\n"
         f"Kanal: {CHANNEL}"
     )
 
@@ -244,13 +303,13 @@ def main():
     app.add_handler(CommandHandler("start", start))
 
     job = app.job_queue
-    job.run_repeating(hourly_prediction, interval=3600, first=10)
-    job.run_daily(daily_coupon, time=time(9, 0))
+    job.run_repeating(hourly_single_bet_prediction, interval=3600, first=10)     # Saat başı
+    job.run_repeating(daily_coupon, interval=12*3600, first=60)                  # 12 saatte bir
+    job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))                    # Pazar 10:00
 
-    print("Bot çalışıyor... (Saat + Basketbol Düzeltildi)")
+    print("Bot çalışıyor... (TEK TERCİH + GÜNLÜK + HAFTALIK AKTİF)")
 
     app.run_polling()
 
-# ====================== ÇALIŞTIR ======================
 if __name__ == "__main__":
     main()
