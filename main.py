@@ -243,4 +243,4 @@ def main():
         app.add_handler(CommandHandler("tahmin", tahmin_cmd))
         app.add_handler(CommandHandler("kupon", kupon_cmd))
         app.add_handler(CommandHandler("sonuclar", sonuclar_cmd))
-        app.add_handler(CommandHandler("istatistik
+        app.add_handler(CommandHandler("istatistik", istatistik_cmd))
