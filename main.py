@@ -1,59 +1,50 @@
-import asyncio
 import os
+import asyncio
 import requests
-import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 from aiogram import Bot, Dispatcher
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime
 
 # ----------------------
-# 1. Telegram Bilgileri
+# 1. Telegram ve API Bilgileri
 # ----------------------
-API_TOKEN = os.getenv("API_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-API_KEY = os.getenv("API_KEY")  # Opsiyonel, canlı API için
+API_TOKEN = os.getenv("API_TOKEN")  # Telegram bot token
+CHAT_ID = os.getenv("CHAT_ID")      # Kanal veya kullanıcı ID
+API_KEY = os.getenv("API_KEY")      # API-Football key
 
-if not API_TOKEN or not CHAT_ID:
-    raise Exception("API_TOKEN ve CHAT_ID environment variable olarak ayarlanmalı!")
+if not API_TOKEN or not CHAT_ID or not API_KEY:
+    raise Exception("API_TOKEN, CHAT_ID ve API_KEY environment variable olarak ayarlanmalı!")
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
 # ----------------------
-# 2. Canlı Maç Verisi Çekme
+# 2. Futbol Maçlarını API-Football’dan Çekme
 # ----------------------
-API_URL = "https://api.sportradar.com/your_endpoint"
-
-async def fetch_live_matches():
+def fetch_football_matches():
     try:
-        if API_KEY:
-            # Canlı API isteği
-            response = requests.get(API_URL, params={"api_key": API_KEY}).json()
-            matches = []
-            for m in response.get("matches", []):
-                matches.append({
-                    "sport": m["sport"],
-                    "home": m["home_team"],
-                    "away": m["away_team"],
-                    "odds": m.get("odds", {}),
-                    "home_stats": m.get("home_stats", [0.5]*5),
-                    "away_stats": m.get("away_stats", [0.5]*5)
-                })
-        else:
-            # Simülasyon veri
-            matches = [
-                {'sport':'football','home':'Team A','away':'Team B','odds':{'1':2.1,'X':3.2,'2':3.0}, 
-                 'home_stats':[2.1,0.5,1.3,0.8,1.2], 'away_stats':[1.8,0.6,1.0,0.9,1.1]},
-                {'sport':'basketball','home':'Team C','away':'Team D','odds':{'1':1.8,'2':2.0}, 
-                 'home_stats':[1.9,0.7,0.8,0.6,1.0], 'away_stats':[1.7,0.6,0.9,0.5,1.1]},
-                {'sport':'tennis','home':'Player A','away':'Player B','odds':{'1':1.9,'2':1.9}, 
-                 'home_stats':[0.8,0.9,0.7,1.0,0.6], 'away_stats':[0.7,0.8,0.9,0.6,0.7]},
-            ]
-    except Exception as e:
-        print("Canlı maç verisi çekilemedi:", e)
+        today = datetime.now().strftime("%Y-%m-%d")
+        url = "https://v3.football.api-sports.io/fixtures"
+        headers = {"X-RapidAPI-Key": API_KEY}
+        params = {"date": today, "league":"39"}  # 39 = Premier League örnek
+        response = requests.get(url, headers=headers, params=params)
+        data = response.json()
         matches = []
-    return matches
+        for m in data.get('response', []):
+            matches.append({
+                'sport':'football',
+                'home': m['teams']['home']['name'],
+                'away': m['teams']['away']['name'],
+                'home_stats':[1,1,1,1,1],  # Simülasyon ML için
+                'away_stats':[1,1,1,1,1],
+                'odds': m.get('odds', {})
+            })
+        return matches
+    except Exception as e:
+        print("Futbol verisi çekilemedi:", e)
+        return []
 
 # ----------------------
 # 3. ML Model Eğitimi
@@ -70,24 +61,16 @@ ml_model = train_model()
 async def ml_prediction(match):
     features = np.array(match['home_stats'] + match['away_stats']).reshape(1,-1)
     pred = ml_model.predict(features)[0]
-
-    if match['sport'] == 'football':
-        x12_map = {0:'1',1:'X',2:'2'}
-        prediction = {"1X2":x12_map[pred],"Alt/Üst":np.random.choice(['Alt','Üst']),"KG":np.random.choice(['Var','Yok'])}
-    elif match['sport'] == 'basketball':
-        x12_map = {0:'1',2:'2'}
-        prediction = {"1X2":x12_map.get(pred,'1'),"Alt/Üst":np.random.choice(['Alt','Üst']),"KG":"Yok"}
-    else:  # tenis
-        x12_map = {0:'1',2:'2'}
-        prediction = {"1X2":x12_map.get(pred,'1'),"Alt/Üst":"Yok","KG":"Yok"}
+    x12_map = {0:'1',1:'X',2:'2'}
+    prediction = {"1X2":x12_map[pred], "Alt/Üst":np.random.choice(['Alt','Üst']), "KG":np.random.choice(['Var','Yok'])}
     return prediction
 
 # ----------------------
-# 4. Önemli Maç Filtreleme
+# 4. Önemli Maçları Seçme
 # ----------------------
 def filter_important_matches(matches, top_n=3):
     for m in matches:
-        m['importance'] = sum(m.get('home_stats',[])) + sum(m.get('away_stats',[]))
+        m['importance'] = sum(m['home_stats']) + sum(m['away_stats'])
     matches.sort(key=lambda x: x['importance'], reverse=True)
     return matches[:top_n]
 
@@ -95,7 +78,7 @@ def filter_important_matches(matches, top_n=3):
 # 5. Günlük Kupon
 # ----------------------
 async def send_daily_coupon():
-    matches = await fetch_live_matches()
+    matches = fetch_football_matches()
     important = filter_important_matches(matches)
     if not important: return
     coupon = []
@@ -110,7 +93,7 @@ async def send_daily_coupon():
 # 6. Saatlik Tahmin
 # ----------------------
 async def send_hourly_prediction():
-    matches = await fetch_live_matches()
+    matches = fetch_football_matches()
     important = filter_important_matches(matches, top_n=1)
     if not important: return
     match = important[0]
