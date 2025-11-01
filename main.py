@@ -534,26 +534,42 @@ def register_handlers(app):
 
 import asyncio
 
+# ============================================================
+# 📦 Ana Uygulama Girişi
+# ============================================================
+
 async def main():
-    logger.info("Starting StakeDrip Pro (v5)...")
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    register_handlers(app)
+    """Telegram bot uygulamasını başlatır."""
+    try:
+        logger.info("🚀 StakeDrip Pro başlatılıyor...")
 
-    # Arka plan görevleri (örneğin saatlik tahmin)
-    asyncio.create_task(schedule_jobs(app))
+        # Telegram uygulamasını oluştur
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Başlatıldığında admin’e bildirim
-    async def notify_start():
-        await asyncio.sleep(2)
-        try:
-            await admin_notify(app, "StakeDrip Pro başlatıldı. (Sunucuya giriş yapıldı.)")
-        except Exception:
-            logger.debug("Could not notify admin at startup.")
+        # Handler'ları kaydet
+        register_handlers(app)
 
-    asyncio.create_task(notify_start())
+        # JobQueue görevlerini planla
+        await schedule_jobs(app)
 
-    # Telegram botunu başlat (async)
-    await app.run_polling()
+        logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
+        await app.run_polling()  # Telegram botunu başlat
+
+    except Exception:
+        logger.exception("❌ Ana uygulama çalışırken hata oluştu.")
+
+
+# ============================================================
+# 🏁 Uygulama Başlatıcı (asyncio loop korumalı)
+# ============================================================
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import asyncio
+
+    try:
+        # Normal ortamlar için (örnek: sunucu, terminal)
+        asyncio.run(main())
+    except RuntimeError:
+        # Eğer event loop zaten çalışıyorsa (örnek: Docker, FastAPI, Jupyter)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main())
