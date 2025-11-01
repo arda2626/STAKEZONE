@@ -152,5 +152,7 @@ async def main():
     await app.run_polling()
 
 # ====================== ÇALIŞTIR ======================
+# ... (yukarıdaki kod aynı kalır) ...
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()  # asyncio.run() YOK!
