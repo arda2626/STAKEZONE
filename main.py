@@ -1,9 +1,9 @@
-# main.py - THE ODDS API (TEK TERCİH + SAAT + GÜNLÜK + HAFTALIK)
+# main.py - THE ODDS API (HATALAR DÜZELTİLDİ)
 import asyncio
 import random
 import aiohttp
 import logging
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, timezone
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -18,10 +18,10 @@ ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 CHANNEL = os.getenv("CHANNEL", "@stakedrip")
 
 if not ODDS_API_KEY:
-    logger.error("HATA: ODDS_API_KEY eksik! Railway'e ekleyin.")
+    logger.error("HATA: ODDS_API_KEY eksik! Railway → Deployment → Variables → ekleyin.")
     exit(1)
 
-# Fallback maçlar (API hatasında)
+# Fallback maçlar
 FALLBACK_MATCHES = [
     {
         "home_team": "Galatasaray", "away_team": "Fenerbahçe",
@@ -32,39 +32,29 @@ FALLBACK_MATCHES = [
             {"name": "Draw", "price": 3.50},
             {"name": "Fenerbahçe", "price": 3.20}
         ]}]}]
-    },
-    {
-        "home_team": "Anadolu Efes", "away_team": "Fenerbahçe Beko",
-        "sport": "basketball", "league": "BSL",
-        "commence_time": "2025-11-01T19:30:00Z",
-        "bookmakers": [{"markets": [{"key": "h2h", "outcomes": [
-            {"name": "Anadolu Efes", "price": 1.95},
-            {"name": "Fenerbahçe Beko", "price": 1.85}
-        ]}]}]
     }
 ]
 
-# The Odds API spor kodları
 SPORTS = {
     "football": [
         "soccer_turkey_super_league", "soccer_epl", "soccer_spain_la_liga",
         "soccer_italy_serie_a", "soccer_germany_bundesliga", "soccer_france_ligue_one",
-        "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga", "soccer_brazil_serie_a"
+        "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga"
     ],
-    "basketball": ["basketball_nba", "basketball_europe_euroleague", "basketball_turkey_super_league"],
-    "tennis": ["tennis_atp_singles"]
+    "basketball": ["basketball_nba"],
+    "tennis": []
 }
 
-# ====================== ZAMAN & DAKİKA ======================
+# ====================== ZAMAN & DAKİKA (TZ FARKI DÜZELTİLDİ) ======================
 def get_time_info(match):
     try:
         dt = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00"))
-        dt_ist = dt.astimezone()
+        dt_ist = dt.astimezone(timezone(timedelta(hours=3)))  # İstanbul
         time_str = dt_ist.strftime("%H:%M")
     except:
         time_str = "Bilinmiyor"
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)  # UTC'de karşılaştır
     if dt <= now <= dt + timedelta(minutes=120):
         mins = int((now - dt).total_seconds() // 60)
         return f"{mins}' Dakika"
@@ -73,9 +63,6 @@ def get_time_info(match):
 
 # ====================== API ÇEKME ======================
 async def fetch_odds(sport: str):
-    if not ODDS_API_KEY:
-        return FALLBACK_MATCHES
-
     matches = []
     codes = SPORTS.get(sport, [])
 
@@ -168,14 +155,16 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
         matches = await fetch_odds(sport)
         for m in matches:
             pred = get_best_bet(m)
-            if pred:
+            if pred:  # None kontrolü
                 all_valid.append({"match": m, "pred": pred})
 
     if not all_valid:
+        logger.info("Bu saat yüksek olasılıklı maç yok.")
         return
 
-    all_valid.sort(key=lambda x: x["pred"]["prob"], reverse=True)[:5]
-    lines = [format_match(item["match"], item["pred"]) for item in all_valid]
+    all_valid.sort(key=lambda x: x["pred"]["prob"], reverse=True)
+    selected = all_valid[:5]  # Güvenli slice
+    lines = [format_match(item["match"], item["pred"]) for item in selected]
 
     msg = f"**{datetime.now().strftime('%H:%M')} YÜKSEK OLASILIK TAHMİNLERİ**\n\n" + "\n\n".join(lines)
     await context.bot.send_message(CHANNEL, msg, parse_mode='Markdown')
@@ -249,7 +238,7 @@ def main():
     job.run_repeating(daily_coupon, interval=12*3600, first=60)
     job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))
 
-    print("Bot çalışıyor... (The Odds API + Tek Tercih)")
+    print("Bot çalışıyor... (The Odds API + Hatalar Düzeltildi)")
     app.run_polling()
 
 if __name__ == "__main__":
