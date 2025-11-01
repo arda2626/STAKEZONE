@@ -29,8 +29,8 @@ from telegram import InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # ------------- CONFIG (env) -------------
-BOT_TOKEN = os.getenv("8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
-API_SPORTS_KEY = os.getenv("460ec2a26e2178f365e61e063bb6b487")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Arxen26")  # your provided username
 DB_PATH = os.getenv("DB_PATH", "/tmp/stakezone_pro.db")
