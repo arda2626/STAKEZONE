@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py — StakeDrip Pro with admin alerts and extended leagues
+# main.py — StakeDrip Pro Stabil Sürüm
 import os
 import io
 import math
@@ -15,7 +15,7 @@ from typing import Optional, List, Tuple
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# optional model libs
+# Model kütüphaneleri
 try:
     import joblib
     import numpy as np
@@ -41,7 +41,6 @@ CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Arxen26")
 DB_PATH = os.getenv("DB_PATH", "/tmp/stakezone_pro.db")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-TIMEZONE = os.getenv("TIMEZONE", "UTC")
 
 if not BOT_TOKEN:
     raise SystemExit("BOT_TOKEN environment variable is required!")
@@ -100,9 +99,6 @@ SCALER_FILE = os.getenv("SCALER_FILE", "/tmp/scaler.pkl")
 
 def train_fallback_model():
     try:
-        import numpy as np
-        from sklearn.preprocessing import StandardScaler
-        from xgboost import XGBClassifier
         np.random.seed(42)
         X = np.column_stack([
             np.random.uniform(100,140,900),
@@ -250,7 +246,7 @@ async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,d
                     away = f["teams"]["away"]["name"]
                     mid = str(f["fixture"]["id"])
                     league = f["league"]["name"]
-                    if league in ["Premier League","La Liga","Serie A","Bundesliga","Ligue 1","Süper Lig","1. Lig","2. Lig"]:  # üst ve ikinci ligler
+                    if league in ["Premier League","La Liga","Serie A","Bundesliga","Ligue 1","Süper Lig","1. Lig","2. Lig"]:
                         matches.append((f"{away} vs {home}", "FUTBOL", start, mid))
             except Exception:
                 continue
@@ -265,7 +261,7 @@ async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,d
                     away = g["teams"]["visitors"]["name"]
                     gid = str(g.get("id") or g.get("gameId") or "")
                     league = g.get("league", {}).get("name", "")
-                    if league in ["NBA","EuroLeague","BSL","LNB Pro A","Liga ACB","Serie A"]:  # önemli basketbol ligleri
+                    if league in ["NBA","EuroLeague","BSL","LNB Pro A","Liga ACB","Serie A"]:
                         matches.append((f"{away} @ {home}", "BASKETBOL", start, gid))
             except Exception:
                 continue
@@ -299,7 +295,6 @@ async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
                 date_str = start_dt.strftime("%Y-%m-%d")
                 existing = cursor.execute("SELECT 1 FROM results WHERE match=? AND date=?", (match_str, date_str)).fetchone()
                 if existing:
-                    logger.debug("Already exists: %s", match_str)
                     continue
                 prob = predict_probability()
                 stake = min(10, max(1, int(prob/10)))
@@ -322,6 +317,8 @@ async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Hourly predictions job failed.")
 
+# ---------------- Daha Fazlası ----------------
+# (Günlük kupon, manuel tahmin, komutlar ve scheduler kısmı yukarıdaki yapıya göre aynı stabil şekilde entegre edilecek)
 # ---------------- Daily Coupon ----------------
 def prob_to_odd(p: float) -> float:
     fair = max(1.01, round(100.0 / max(1.0, p), 2))
