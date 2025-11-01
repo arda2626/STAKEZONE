@@ -467,17 +467,42 @@ def seconds_until_next_hour():
     return max(1, int((next_hour - now).total_seconds()))
 
 async def schedule_jobs(app):
-    logger.info("Scheduling hourly job in 2484 seconds.")
-    jq = app.job_queue
+    """JobQueue zamanlayıcısı: saatlik tahmin, günlük kupon ve sonuç kontrolü."""
+    try:
+        jq = app.job_queue
+        if not jq:
+            logger.warning("⚠️ JobQueue başlatılamadı — tahmin planlayıcısı devre dışı.")
+            return
 
-    if jq:
-        jq.run_repeating(send_hourly_predictions, interval=3600, first=first)
-        logger.info("✅ JobQueue aktif — saatlik tahmin planlandı.")
-    else:
-        logger.warning("⚠️ JobQueue başlatılamadı — tahmin planlayıcısı devre dışı.")
-    jq.run_repeating(send_daily_coupon, interval=60*60*6, first=60*10)
-    jq.run_repeating(lambda ctx: asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api), interval=300, first=30)
+        # İlk saat başına kadar kaç saniye kaldığını hesapla
+        first_run = seconds_until_next_hour()
 
+        # Saatlik tahmin (her 1 saatte bir)
+        jq.run_repeating(
+            send_hourly_predictions,
+            interval=3600,            # 1 saat
+            first=first_run
+        )
+        logger.info(f"✅ Saatlik tahmin planlandı (ilk çalıştırma {first_run} saniye sonra).")
+
+        # Günlük kupon (6 saatte bir)
+        jq.run_repeating(
+            send_daily_coupon,
+            interval=60*60*6,         # 6 saat
+            first=60*10               # 10 dakika sonra başlasın
+        )
+        logger.info("✅ Günlük kupon planlandı (6 saatte bir).")
+
+        # Sonuç güncelleme (5 dakikada bir)
+        jq.run_repeating(
+            lambda ctx: asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api),
+            interval=300,             # 5 dakika
+            first=30                  # 30 saniye sonra başlasın
+        )
+        logger.info("✅ Sonuç kontrolü planlandı (5 dakikada bir).")
+
+    except Exception:
+        logger.exception("❌ schedule_jobs içinde hata oluştu.")
 # ------------- admin notify util -------------
 async def admin_notify(app, text: str):
     try:
