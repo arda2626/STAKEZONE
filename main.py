@@ -1,4 +1,4 @@
-# main.py - RAILWAY UYUMLU, EVENT LOOP HATASI YOK
+# main.py - RAILWAY UYUMLU, @stakedrip'e TAHMİN GÖNDERİR
 import asyncio
 import random
 import aiohttp
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # ====================== CONFIG ======================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("API_KEY")
-CHANNEL = os.getenv("CHANNEL", "@ai_tahmin_kanali")
+CHANNEL = os.getenv("CHANNEL", "@stakedrip")  # KANAL BURADA!
 
 FALLBACK_MATCHES = [
     {"teams": {"home": {"name": "Galatasaray"}, "away": {"name": "Fenerbahçe"}}},
@@ -148,11 +148,10 @@ def main():
     job.run_repeating(hourly_prediction, interval=3600, first=10)
     job.run_daily(daily_coupon, time=time(9, 0))
 
-    print("Bot çalışıyor... (TEK DOSYA, EVENT LOOP HATASI YOK)")
+    print(f"Bot çalışıyor... Kanal: {CHANNEL}")
 
-    # run_polling() kendi loop'unu yönetir → asyncio.run() YOK!
-    app.run_polling()  # SENKRON ÇALIŞIR
+    app.run_polling()
 
 # ====================== ÇALIŞTIR ======================
 if __name__ == "__main__":
-    main()  # asyncio.run() YOK!
+    main()
