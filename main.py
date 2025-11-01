@@ -9,11 +9,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+import nest_asyncio
 
 # ----------------- Konfigürasyon -----------------
-TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"
-API_SPORTS_KEY = "YOUR_API_KEY"
-CHANNEL_ID = "@your_channel"
+TELEGRAM_TOKEN = "YOUR_BOT_TOKEN"  # Telegram bot token
+API_SPORTS_KEY = "YOUR_API_KEY"    # API-Sports key
+CHANNEL_ID = "@your_channel"       # Kanal kullanıcı adı veya ID
 
 # ----------------- Logging -----------------
 logging.basicConfig(level=logging.INFO)
@@ -47,7 +48,6 @@ class SportsMLPredictor:
                 df = pd.DataFrame(data.get('response', []))
                 if df.empty:
                     return pd.DataFrame()
-                # Basit özellikler
                 df['home_goals_avg'] = df['goals'].apply(lambda x: x['home'])
                 df['away_goals_avg'] = df['goals'].apply(lambda x: x['away'])
                 df['outcome'] = np.where(df['home_goals_avg'] > df['away_goals_avg'], 1,
@@ -71,10 +71,8 @@ class SportsMLPredictor:
             return {"1X2": "1", "AltUst": "Üst", "KG": "Var", "Oran": 2.1}
         pred = self.model.predict([[home_avg, away_avg]])[0]
         prob = self.model.predict_proba([[home_avg, away_avg]])[0]
-        lambda_home = home_avg
-        lambda_away = away_avg
-        total_goals = lambda_home + lambda_away
-        kg_prob = 1 - (np.exp(-lambda_home) * np.exp(-lambda_away))
+        total_goals = home_avg + away_avg
+        kg_prob = 1 - (np.exp(-home_avg) * np.exp(-away_avg))
         alt_ust = "Alt" if total_goals < total_line else "Üst"
         return {
             "1X2": {1: "1", 0: "X", 2: "2"}[pred],
@@ -97,8 +95,7 @@ async def get_upcoming_matches(hours=24):
             return data.get('response', [])
 
 async def get_odds(match_id):
-    # Gerçek API kullanılacaksa parse et
-    # Şimdilik dummy
+    # Şimdilik dummy oranlar
     return {"1": 2.0, "X": 3.0, "2": 2.5, "Over2.5": 1.8, "KGVar": 1.9}
 
 # ----------------- Bot Komutları -----------------
@@ -147,20 +144,18 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
 
 # ----------------- Ana Fonksiyon -----------------
 async def main():
+    nest_asyncio.apply()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
 
-    # JobQueue
     job_queue = app.job_queue
     job_queue.run_daily(daily_coupon, time=time(hour=9, minute=0))
     job_queue.run_repeating(hourly_prediction, interval=3600, first=0)
 
-    # ML Model Eğitimi
     df = await predictor.fetch_historical_data()
     if not df.empty:
         predictor.train(df)
 
-    # Bot Başlat
     logger.info("Bot çalışıyor...")
     await app.run_polling()
 
