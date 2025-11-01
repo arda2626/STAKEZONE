@@ -1,4 +1,4 @@
-# main.py - ORANLAR DOĞRU + RENKLİ + THESPORTSDB + KAZANÇ
+# main.py - HATA YOK + ORAN DOĞRU + TEK CONTAINER + THESPORTSDB
 import asyncio
 import random
 import aiohttp
@@ -9,10 +9,11 @@ import sys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+# ====================== LOGGING ======================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# CONFIG
+# ====================== CONFIG ======================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 THESPORTSDB_API_KEY = os.getenv("THESPORTSDB_API_KEY", "123")
@@ -22,9 +23,13 @@ if not all([TOKEN, ODDS_API_KEY]):
     logger.error("HATA: TELEGRAM_TOKEN veya ODDS_API_KEY eksik!")
     sys.exit(1)
 
-if not os.getenv("RAILWAY_REPLICA_ID"):
-    logger.info("Replica ID yok → Çıkılıyor")
+# TEK CONTAINER - SIKI KONTROL
+REPLICA_ID = os.getenv("RAILWAY_REPLICA_ID")
+if not REPLICA_ID:
+    logger.info("Replica ID yok → Çıkılıyor (tek container)")
     sys.exit(0)
+else:
+    logger.info(f"Replica ID: {REPLICA_ID} → Çalışıyor")
 
 SPORTS = {
     "football": ["soccer_turkey_super_league", "soccer_epl", "soccer_spain_la_liga"],
@@ -42,6 +47,7 @@ WIN_COUNT = 0
 LOSE_COUNT = 0
 PREDICTIONS = []
 
+# ====================== ZAMAN ======================
 def get_time_info(match):
     try:
         dt = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00"))
@@ -59,6 +65,7 @@ def get_time_info(match):
     else:
         return f"`{date_str} – {time_str}` {EMOJI['upcoming']}"
 
+# ====================== ODDS API ======================
 async def fetch_odds(sport: str):
     matches = []
     for code in SPORTS.get(sport, []):
@@ -77,7 +84,7 @@ async def fetch_odds(sport: str):
             logger.error(f"{code} hatası: {e}")
     return matches
 
-# DOĞRU ORAN HESAPLAMA
+# ====================== TAHMİN (HATASIZ) ======================
 def get_best_bet(match):
     book = match.get("bookmakers", [{}])[0]
     h2h = next((m for m in book.get("markets", []) if m["key"] == "h2h"), None)
@@ -92,13 +99,15 @@ def get_best_bet(match):
     p_away = 1 / away["price"] if away else 0
     p_draw = 1 / draw["price"] if draw else 0
 
+    # DÜZELTME: over ve under tanımlı değilse hata
+    over = under = None
     totals = next((m for m in book.get("markets", []) if m["key"] == "totals"), None)
-    p_over = p_under = 0
     if totals:
         over = next((x for x in totals["outcomes"] if "Over" in x["name"]), None)
         under = next((x for x in totals["outcomes"] if "Under" in x["name"]), None)
-        p_over = 1 / over["price"] if over else 0
-        p_under = 1 / under["price"] if under else 0
+
+    p_over = 1 / over["price"] if over else 0
+    p_under = 1 / under["price"] if under else 0
 
     p_kg_var = 0.6 if p_home > 0.3 and p_away > 0.3 else 0.3
     p_kg_yok = 1 - p_kg_var
@@ -121,6 +130,7 @@ def get_best_bet(match):
 
     return {"bet": best_bet, "oran": oran, "prob": int(best_prob * 100)}
 
+# ====================== FORMAT ======================
 def format_match(match, pred, number=None, is_live=False):
     sport_emoji = EMOJI.get(match["sport"], "Unknown")
     time_info = get_time_info(match)
@@ -132,6 +142,7 @@ def format_match(match, pred, number=None, is_live=False):
         f"   **{pred['bet']}** → **{pred['oran']}** | `%{pred['prob']} AI`"
     )
 
+# ====================== CANLI SKOR ======================
 async def check_live_results(context: ContextTypes.DEFAULT_TYPE):
     global WIN_COUNT, LOSE_COUNT, PREDICTIONS
     today = datetime.now().strftime("%Y-%m-%d")
@@ -151,9 +162,9 @@ async def check_live_results(context: ContextTypes.DEFAULT_TYPE):
         away = event["strAwayTeam"]
         home_goals = int(event["intHomeScore"])
         away_goals = int(event["intAwayScore"])
-        match_id = f"{home}{away}{event['dateEvent']}"
+        match_id = hash(f"{home}{away}{event['dateEvent']}")
 
-        if any(p.get("match_id") == hash(match_id) for p in PREDICTIONS): continue
+        if any(p.get("match_id") == match_id for p in PREDICTIONS): continue
 
         pred = next((p for p in PREDICTIONS if p["home"] == home and p["away"] == away), None)
         if not pred: continue
@@ -177,8 +188,9 @@ async def check_live_results(context: ContextTypes.DEFAULT_TYPE):
         else:
             LOSE_COUNT += 1
 
-        PREDICTIONS = [p for p in PREDICTIONS if p.get("match_id") != hash(match_id)]
+        PREDICTIONS = [p for p in PREDICTIONS if p.get("match_id") != match_id]
 
+# ====================== SAAT BAŞI ======================
 async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
     global PREDICTIONS
     live_matches = []
@@ -198,9 +210,9 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
             else:
                 upcoming_matches.append(item)
 
-            match_id = f"{m['home_team']}{m['away_team']}{m['commence_time']}"
+            match_id = hash(f"{m['home_team']}{m['away_team']}{m['commence_time']}")
             PREDICTIONS.append({
-                "match_id": hash(match_id),
+                "match_id": match_id,
                 "home": m['home_team'],
                 "away": m['away_team'],
                 "bet": pred['bet'],
@@ -235,11 +247,11 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
     if has_content:
         await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
 
+# ====================== KUPONLAR ======================
 async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     all_matches = []
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
-
     if len(all_matches) < 3: return
 
     selected = random.sample(all_matches, 3)
@@ -257,7 +269,6 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
     all_matches = []
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
-
     if len(all_matches) < 7: return
 
     selected = random.sample(all_matches, 7)
@@ -271,6 +282,7 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
 
+# ====================== ANA ======================
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Bot aktif!")))
@@ -281,7 +293,7 @@ def main():
     job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))
     job.run_repeating(check_live_results, interval=300, first=300)
 
-    print("Bot çalışıyor... (ORANLAR DOĞRU + RENKLİ + THESPORTSDB)")
+    print("Bot çalışıyor... (HATA YOK + ORAN DOĞRU + TEK CONTAINER)")
     app.run_polling()
 
 if __name__ == "__main__":
