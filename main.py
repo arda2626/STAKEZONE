@@ -467,10 +467,14 @@ def seconds_until_next_hour():
     return max(1, int((next_hour - now).total_seconds()))
 
 async def schedule_jobs(app):
-    first = seconds_until_next_hour()
-    logger.info("Scheduling hourly job in %s seconds.", first)
+    logger.info("Scheduling hourly job in 2484 seconds.")
     jq = app.job_queue
-    jq.run_repeating(send_hourly_predictions, interval=3600, first=first)
+
+    if jq:
+        jq.run_repeating(send_hourly_predictions, interval=3600, first=first)
+        logger.info("✅ JobQueue aktif — saatlik tahmin planlandı.")
+    else:
+        logger.warning("⚠️ JobQueue başlatılamadı — tahmin planlayıcısı devre dışı.")
     jq.run_repeating(send_daily_coupon, interval=60*60*6, first=60*10)
     jq.run_repeating(lambda ctx: asyncio.get_running_loop().run_in_executor(None, update_match_results_from_api), interval=300, first=30)
 
