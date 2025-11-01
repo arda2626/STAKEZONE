@@ -1,4 +1,4 @@
-# main.py - %100 ÇALIŞIR + TEK CONTAINER + BOŞ MESAJ YOK
+# main.py - TÜMÜ BİR ARADA: RENKLİ + CANLI SKOR + KAZANÇ TAKİBİ
 import asyncio
 import random
 import aiohttp
@@ -16,16 +16,15 @@ logger = logging.getLogger(__name__)
 # ====================== CONFIG ======================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
+LIVESCORE_API_KEY = os.getenv("LIVESCORE_API_KEY")  # API-Sports
 CHANNEL = os.getenv("CHANNEL", "@stakedrip")
 
-if not ODDS_API_KEY:
-    logger.error("HATA: ODDS_API_KEY eksik!")
-    exit(1)
+if not all([TOKEN, ODDS_API_KEY, LIVESCORE_API_KEY]):
+    logger.error("HATA: TELEGRAM_TOKEN, ODDS_API_KEY veya LIVESCORE_API_KEY eksik!")
+    sys.exit(1)
 
-# TEK CONTAINER KONTROLÜ
-if os.getenv("RAILWAY_REPLICA_ID") and len(os.getenv("RAILWAY_REPLICA_ID")) > 0:
-    logger.info(f"Replica ID: {os.getenv('RAILWAY_REPLICA_ID')} → Çalışıyor")
-else:
+# TEK CONTAINER
+if not os.getenv("RAILWAY_REPLICA_ID"):
     logger.info("Replica ID yok → Çıkılıyor (tek container)")
     sys.exit(0)
 
@@ -37,10 +36,16 @@ SPORTS = {
 
 EMOJI = {
     "football": "Football", "basketball": "Basketball", "tennis": "Tennis",
-    "live": "Fire", "upcoming": "Briefcase", "daily": "Ticket", "weekly": "Gem"
+    "live": "Fire", "upcoming": "Briefcase", "win": "Check Mark Button", "lose": "Cross Mark",
+    "daily": "Ticket", "weekly": "Gem"
 }
 
-# ====================== ZAMAN (GMT+3 + TARİH) ======================
+# KAZANÇ TAKİBİ (Kalıcı: basit global, istersen SQLite)
+WIN_COUNT = 0
+LOSE_COUNT = 0
+PREDICTIONS = []  # {match_id, bet, oran, result}
+
+# ====================== ZAMAN ======================
 def get_time_info(match):
     try:
         dt = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00"))
@@ -54,11 +59,11 @@ def get_time_info(match):
     now = datetime.now(timezone.utc)
     if dt <= now <= dt + timedelta(minutes=120):
         mins = int((now - dt).total_seconds() // 60)
-        return f"`{date_str}` – `{mins}'` {EMOJI['live']}"
+        return f"`{date_str} – {mins}'` {EMOJI['live']}"
     else:
-        return f"`{date_str}` – `{time_str}` {EMOJI['upcoming']}"
+        return f"`{date_str} – {time_str}` {EMOJI['upcoming']}"
 
-# ====================== API ======================
+# ====================== ODDS API ======================
 async def fetch_odds(sport: str):
     matches = []
     for code in SPORTS.get(sport, []):
@@ -81,10 +86,9 @@ async def fetch_odds(sport: str):
 def get_best_bet(match):
     book = match.get("bookmakers", [{}])[0]
     h2h = next((m for m in book.get("markets", []) if m["key"] == "h2h"), None)
-    if not h2h:
-        return None
+    if not h2h: return None
 
-    o = h2h["outcomes"]  # DÜZELTİLDİ: h2 demonic → h2h
+    o = h2h["outcomes"]
     home = next((x for x in o if x["name"] == match["home_team"]), None)
     away = next((x for x in o if x["name"] == match["away_team"]), None)
     draw = next((x for x in o if x["name"] == "Draw"), None)
@@ -115,26 +119,78 @@ def get_best_bet(match):
     ]
 
     valid = [b for b in bets if b[1] >= 0.50]
-    if not valid:
-        return None
+    if not valid: return None
 
     best, prob = max(valid, key=lambda x: x[1])
     return {"bet": best, "oran": round(prob * 2.8 + random.uniform(-0.2, 0.3), 2), "prob": int(prob * 100)}
 
-# ====================== FORMAT ======================
+# ====================== RENKLİ FORMAT ======================
 def format_match(match, pred, number=None, is_live=False):
     sport_emoji = EMOJI.get(match["sport"], "Unknown")
     time_info = get_time_info(match)
     live_tag = EMOJI['live'] if is_live else ""
-    num = f"{number}. " if number else ""
+    num = f"**{number}.** " if number else ""
     return (
         f"{num}**{match['home_team']} vs {match['away_team']}** {sport_emoji} {live_tag}\n"
         f"   {time_info} | `{match.get('league', 'Lig')}`\n"
         f"   **{pred['bet']}** → **{pred['oran']}** | `%{pred['prob']} AI`"
     )
 
-# ====================== SAAT BAŞI ======================
+# ====================== CANLI SKOR (API-Sports) ======================
+async def check_live_results(context: ContextTypes.DEFAULT_TYPE):
+    global WIN_COUNT, LOSE_COUNT, PREDICTIONS
+    url = "https://v3.football.api-sports.io/fixtures"
+    headers = {'x-rapidapi-key': LIVESCORE_API_KEY}
+    params = {'live': 'all'}
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as resp:
+            if resp.status != 200: return
+            data = await resp.json()
+            live_fixtures = data.get('response', [])
+
+    for fixture in live_fixtures:
+        match_id = fixture['fixture']['id']
+        home = fixture['teams']['home']['name']
+        away = fixture['teams']['away']['name']
+        home_goals = fixture['goals']['home']
+        away_goals = fixture['goals']['away']
+        status = fixture['fixture']['status']['short']
+
+        # Sadece biten maçlar
+        if status not in ['FT', 'AOT', 'PEN']: continue
+
+        # Daha önce işlenmiş mi?
+        if any(p['match_id'] == match_id for p in PREDICTIONS): continue
+
+        # Tahmin var mı?
+        pred = next((p for p in PREDICTIONS if p['home'] == home and p['away'] == away), None)
+        if not pred: continue
+
+        result = "win" if (
+            (pred['bet'] == "1 (Ev)" and home_goals > away_goals) or
+            (pred['bet'] == "2 (Dep)" and away_goals > home_goals) or
+            (pred['bet'] == "X" and home_goals == away_goals) or
+            (pred['bet'] == "Üst 2.5" and home_goals + away_goals > 2.5) or
+            (pred['bet'] == "Alt 2.5" and home_goals + away_goals < 2.5) or
+            (pred['bet'] == "KG Var" and home_goals > 0 and away_goals > 0) or
+            (pred['bet'] == "KG Yok" and (home_goals == 0 or away_goals == 0))
+        ) else "lose"
+
+        emoji = EMOJI['win'] if result == "win" else EMOJI['lose']
+        text = f"{emoji} **{home} {home_goals}-{away_goals} {away}** → **{pred['bet']}** {'KAZANDI' if result == 'win' else 'KAYBETTİ'}!"
+        await context.bot.send_message(CHANNEL, text, parse_mode='Markdown')
+
+        if result == "win":
+            WIN_COUNT += 1
+        else:
+            LOSE_COUNT += 1
+
+        PREDICTIONS = [p for p in PREDICTIONS if p['match_id'] != match_id]
+
+# ====================== SAAT BAŞI TAHMİN ======================
 async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
+    global PREDICTIONS
     live_matches = []
     upcoming_matches = []
 
@@ -145,10 +201,22 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
             if not pred: continue
             now = datetime.now(timezone.utc)
             dt = datetime.fromisoformat(m["commence_time"].replace("Z", "+00:00"))
-            if dt <= now <= dt + timedelta(minutes=120):
-                live_matches.append({"match": m, "pred": pred})
+            is_live = dt <= now <= dt + timedelta(minutes=120)
+            item = {"match": m, "pred": pred, "is_live": is_live}
+            if is_live:
+                live_matches.append(item)
             else:
-                upcoming_matches.append({"match": m, "pred": pred})
+                upcoming_matches.append(item)
+
+            # Tahmini kaydet
+            match_id = f"{m['home_team']}{m['away_team']}{m['commence_time']}"
+            PREDICTIONS.append({
+                "match_id": hash(match_id),
+                "home": m['home_team'],
+                "away": m['away_team'],
+                "bet": pred['bet'],
+                "oran": pred['oran']
+            })
 
     lines = []
     ist_now = datetime.now(timezone(timedelta(hours=3))).strftime("%H:%M")
@@ -157,26 +225,26 @@ async def hourly_prediction(context: ContextTypes.DEFAULT_TYPE):
     has_content = False
 
     if live_matches:
-        live_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)
-        selected_live = live_matches[:3]
+        live_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)[:3]
         lines.append(f"**CANLI ATEŞ** {EMOJI['live']}")
-        for i, item in enumerate(selected_live, 1):
+        for i, item in enumerate(live_matches, 1):
             lines.append(format_match(item["match"], item["pred"], number=i, is_live=True))
         has_content = True
 
     if upcoming_matches:
-        upcoming_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)
-        selected_upcoming = upcoming_matches[:5]
+        upcoming_matches.sort(key=lambda x: x["pred"]["prob"], reverse=True)[:5]
         if live_matches: lines.append("")
-        start_num = len(selected_live) + 1 if live_matches else 1
-        for i, item in enumerate(selected_upcoming, start_num):
+        start_num = len(live_matches) + 1 if live_matches else 1
+        for i, item in enumerate(upcoming_matches, start_num):
             lines.append(format_match(item["match"], item["pred"], number=i))
         has_content = True
 
+    if WIN_COUNT + LOSE_COUNT > 0:
+        win_rate = (WIN_COUNT / (WIN_COUNT + LOSE_COUNT)) * 100
+        lines.append(f"\n**Kazanç Takibi:** `{WIN_COUNT}W - {LOSE_COUNT}L` | `%{win_rate:.1f}`")
+
     if has_content:
         await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
-    else:
-        logger.info("Tahmin yok → mesaj gönderilmedi.")
 
 # ====================== GÜNLÜK KUPON ======================
 async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
@@ -184,25 +252,16 @@ async def daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 3:
-        logger.info("Günlük kupon için yeterli maç yok.")
-        return
+    if len(all_matches) < 3: return
 
     selected = random.sample(all_matches, 3)
     lines = [f"**GÜNLÜK KUPON** {EMOJI['daily']}\n"]
     total = 1.0
-    valid_count = 0
     for i, m in enumerate(selected, 1):
         pred = get_best_bet(m)
         if pred:
             total *= pred["oran"]
             lines.append(format_match(m, pred, number=i))
-            valid_count += 1
-
-    if valid_count == 0:
-        logger.info("Günlük kupon: Hiç geçerli tahmin yok.")
-        return
-
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
 
@@ -212,34 +271,21 @@ async def weekly_coupon(context: ContextTypes.DEFAULT_TYPE):
     for sport in ["football", "basketball"]:
         all_matches.extend(await fetch_odds(sport))
 
-    if len(all_matches) < 7:
-        logger.info("Haftalık kupon için yeterli maç yok.")
-        return
+    if len(all_matches) < 7: return
 
     selected = random.sample(all_matches, 7)
     lines = [f"**HAFTALIK KASA** {EMOJI['weekly']}\n"]
     total = 1.0
-    valid_count = 0
     for i, m in enumerate(selected, 1):
         pred = get_best_bet(m)
         if pred:
             total *= pred["oran"]
             lines.append(format_match(m, pred, number=i))
-            valid_count += 1
-
-    if valid_count == 0:
-        logger.info("Haftalık kupon: Hiç geçerli tahmin yok.")
-        return
-
     lines.append(f"\n**Toplam Oran:** `{total:.2f}`")
     await context.bot.send_message(CHANNEL, "\n".join(lines), parse_mode='Markdown')
 
 # ====================== ANA ======================
 def main():
-    if not TOKEN:
-        print("HATA: TELEGRAM_TOKEN eksik!")
-        return
-
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Bot aktif!")))
 
@@ -247,8 +293,9 @@ def main():
     job.run_repeating(hourly_prediction, interval=3600, first=10)
     job.run_repeating(daily_coupon, interval=12*3600, first=60)
     job.run_daily(weekly_coupon, time=time(10, 0), days=(6,))
+    job.run_repeating(check_live_results, interval=300, first=300)  # Her 5 dakikada skor kontrol
 
-    print("Bot çalışıyor... (YAZIM HATASI DÜZELTİLDİ + TEK CONTAINER)")
+    print("Bot çalışıyor... (RENKLİ + CANLI SKOR + KAZANÇ TAKİBİ)")
     app.run_polling()
 
 if __name__ == "__main__":
