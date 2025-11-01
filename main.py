@@ -136,7 +136,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Canlı tahmin botu aktif!\nKanal: {CHANNEL}")
 
 # ====================== ANA FONKSİYON ======================
-async def main():
+def main():
     if not TOKEN:
         print("HATA: TELEGRAM_TOKEN eksik!")
         return
@@ -150,9 +150,9 @@ async def main():
 
     print("Bot çalışıyor... (TEK DOSYA, EVENT LOOP HATASI YOK)")
 
-    # run_polling() kendi loop'unu yönetir, ama Railway worker'da asyncio.run() gerekli
-    await app.run_polling()
+    # run_polling() kendi loop'unu yönetir → asyncio.run() YOK!
+    app.run_polling()  # SENKRON ÇALIŞIR
 
 # ====================== ÇALIŞTIR ======================
 if __name__ == "__main__":
-    asyncio.run(main())  # GERİ EKLE! Worker için zorunlu
+    main()  # asyncio.run() YOK!
