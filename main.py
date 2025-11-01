@@ -26,7 +26,14 @@ except Exception:
     MODEL_AVAILABLE = False
 
 from telegram import InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters
+)
+import asyncio
 
 # ------------- CONFIG (env) -------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -496,24 +503,28 @@ def register_handlers(app):
     app.add_handler(CommandHandler("surpriz", surpriz_cmd))
     app.add_handler(CommandHandler("admin", admin_cmd))
 
-def main():
+import asyncio
+
+async def main():
     logger.info("Starting StakeDrip Pro (v5)...")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     register_handlers(app)
-    loop = asyncio.get_event_loop()
-    loop.create_task(schedule_jobs(app))
-    try:
-        # notify admin that bot started
-        async def notify_start():
-            await asyncio.sleep(2)
-            try:
-                await admin_notify(app, "StakeDrip Pro başlatıldı. (Sunucuya giriş yapıldı.)")
-            except Exception:
-                logger.debug("Could not notify admin at startup.")
-        loop.create_task(notify_start())
-        app.run_polling()
-    except Exception:
-        logger.exception("Fatal error running bot.")
+
+    # Arka plan görevleri (örneğin saatlik tahmin)
+    asyncio.create_task(schedule_jobs(app))
+
+    # Başlatıldığında admin’e bildirim
+    async def notify_start():
+        await asyncio.sleep(2)
+        try:
+            await admin_notify(app, "StakeDrip Pro başlatıldı. (Sunucuya giriş yapıldı.)")
+        except Exception:
+            logger.debug("Could not notify admin at startup.")
+
+    asyncio.create_task(notify_start())
+
+    # Telegram botunu başlat (async)
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
