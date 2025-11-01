@@ -503,17 +503,27 @@ async def schedule_jobs(app):
     except Exception:
         logger.exception("❌ schedule_jobs içinde hata oluştu.")
 
-# ---------------- MAIN ----------------
+# ---------------- MAIN ----------------# ---------------- MAIN ----------------
 async def start_bot():
-    logger.info("🚀 StakeDrip Pro başlatılıyor...")
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    register_handlers(app)
-    asyncio.create_task(schedule_jobs(app))
-    logger.info("✅ Bot başlatıldı ve tek instance çalışıyor")
-    await app.run_polling()
+    try:
+        logger.info("🚀 StakeDrip Pro başlatılıyor...")
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        register_handlers(app)
+        # JobQueue'yu başlat
+        app.job_queue.run_once(lambda ctx: asyncio.create_task(schedule_jobs(app)), 1)
+        logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
+        await app.run_polling()
+    except Exception:
+        logger.exception("❌ Ana uygulama çalışırken hata oluştu.")
 
 if __name__ == "__main__":
+    import asyncio
     try:
-        asyncio.run(start_bot())
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Mevcut loop varsa task olarak başlat
+            asyncio.create_task(start_bot())
+        else:
+            asyncio.run(start_bot())
     except RuntimeError as e:
         logger.error("Event loop hatası: %s", e)
