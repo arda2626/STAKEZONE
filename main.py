@@ -1,9 +1,9 @@
-# main.py - TEK DOSYA, MODÜLER MANTIK, RAILWAY UYUMLU
+# main.py - TEK DOSYA, RAILWAY UYUMLU, HATA YOK
 import asyncio
 import random
 import aiohttp
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time  # time EKLE!
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -23,15 +23,15 @@ FALLBACK_MATCHES = [
 ]
 
 SPORTS = {
-    "football": {"url": "https://v3.football.api-sports.io", "league": 140},  # Süper Lig
-    "basketball": {"url": "https://v3.basketball.api-sports.io", "league": 12},  # NBA
-    "tennis": {"url": "https://v3.tennis.api-sports.io", "league": 1}  # ATP
+    "football": {"url": "https://v3.football.api-sports.io", "league": 140},
+    "basketball": {"url": "https://v3.basketball.api-sports.io", "league": 12},
+    "tennis": {"url": "https://v3.tennis.api-sports.io", "league": 1}
 }
 
 # ====================== API WRAPPER ======================
 async def fetch_matches(sport: str = "football", hours: int = 24):
     if not API_KEY:
-        logger.warning("API_KEY yok → Fallback maçlar kullanılıyor")
+        logger.warning("API_KEY yok → Fallback maçlar")
         return FALLBACK_MATCHES
 
     config = SPORTS[sport]
@@ -54,10 +54,8 @@ async def fetch_matches(sport: str = "football", hours: int = 24):
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("response", [])[:10]
-                else:
-                    logger.error(f"API {sport} hatası: {resp.status}")
     except Exception as e:
-        logger.error(f"API bağlantı hatası: {e}")
+        logger.error(f"API hatası: {e}")
 
     return FALLBACK_MATCHES
 
@@ -140,7 +138,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ====================== ANA FONKSİYON ======================
 async def main():
     if not TOKEN:
-        print("HATA: TELEGRAM_TOKEN eksik! Railway Variables'a ekle.")
+        print("HATA: TELEGRAM_TOKEN eksik!")
         return
 
     app = Application.builder().token(TOKEN).build()
@@ -148,7 +146,7 @@ async def main():
 
     job = app.job_queue
     job.run_repeating(hourly_prediction, interval=3600, first=10)
-    job.run_daily(daily_coupon, time=datetime.time(9, 0))
+    job.run_daily(daily_coupon, time=time(9, 0))  # time() doğru!
 
     print("Bot çalışıyor... (TEK DOSYA, MODÜLER MANTIK)")
     await app.run_polling()
