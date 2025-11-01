@@ -509,20 +509,21 @@ async def start_bot():
         logger.info("🚀 StakeDrip Pro başlatılıyor...")
         app = ApplicationBuilder().token(BOT_TOKEN).build()
         register_handlers(app)
+
         # JobQueue başlat
         app.job_queue.run_once(lambda ctx: asyncio.create_task(schedule_jobs(app)), 1)
-        logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
+
+        # Polling başlat
         await app.run_polling()
     except Exception:
         logger.exception("❌ Ana uygulama çalışırken hata oluştu.")
 
 if __name__ == "__main__":
-    import asyncio
     loop = asyncio.get_event_loop()
     if loop.is_running():
-        # Eğer loop zaten çalışıyorsa create_task ile başlat
+        # Mevcut event loop üzerinde botu başlat
         asyncio.create_task(start_bot())
-        logger.info("Bot başlatıldı (mevcut loop üzerinde).")
+        logger.info("✅ Bot başlatıldı (mevcut loop üzerinde).")
     else:
-        # Standalone çalışmada run_until_complete kullan
+        # Yeni loop oluştur ve çalıştır
         loop.run_until_complete(start_bot())
