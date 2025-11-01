@@ -244,3 +244,14 @@ def main():
         app.add_handler(CommandHandler("kupon", kupon_cmd))
         app.add_handler(CommandHandler("sonuclar", sonuclar_cmd))
         app.add_handler(CommandHandler("istatistik", istatistik_cmd))
+        app.add_handler(CommandHandler("trend", trend_cmd))
+        app.add_handler(CommandHandler("surpriz", surpriz_cmd))
+        app.add_handler(CommandHandler("admin", admin_cmd))
+
+        # JobQueue ve bot başlatma
+        app.job_queue.run_once(lambda ctx: asyncio.create_task(schedule_jobs(app)), 1)
+        logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
+        app.run_polling()
+
+    except Exception as e:
+        logger.exception("❌ Ana uygulama çalışırken hata oluştu: %s", e)
