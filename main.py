@@ -10,7 +10,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # === Environment Variables (Railway'de ekle) ===
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("API_KEY")
-CHANNEL = os.getenv("CHANNEL", "@ai_tahmin_kanali")  # Varsayılan
+CHANNEL = os.getenv("CHANNEL", "@stakedrip")  # Varsayılan
 
 # API-Sports (Futbol, Basketbol, Tenis)
 SPORTS = {
