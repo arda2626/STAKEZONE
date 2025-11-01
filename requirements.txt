@@ -1,6 +1,6 @@
-aiogram==3.22.0
-apscheduler
-pandas
-numpy
-scikit-learn
-requests
+python-telegram-bot==20.3
+aiohttp>=3.8.1
+pandas>=1.5.0
+numpy>=1.25.0
+scikit-learn>=1.3.0
+nest_asyncio>=1.5.6
