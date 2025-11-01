@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-# main.py — StakeDrip Pro Gelişmiş (admin: Arxen26)
-
-import os, io, math, time, json, random, logging, sqlite3, asyncio, requests
+# main.py — StakeDrip Pro with admin alerts and extended leagues
+import os
+import io
+import math
+import time
+import json
+import random
+import logging
+import sqlite3
+import asyncio
+import requests
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
+
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-# optional ML model
+# optional model libs
 try:
     import joblib
     import numpy as np
@@ -17,28 +26,38 @@ except Exception:
     MODEL_AVAILABLE = False
 
 from telegram import InputFile
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters
+)
 
-# ================= CONFIG =================
+# ---------------- CONFIG ----------------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_SPORTS_KEY = os.getenv("API_SPORTS_KEY")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "Arxen26")
 DB_PATH = os.getenv("DB_PATH", "/tmp/stakezone_pro.db")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+TIMEZONE = os.getenv("TIMEZONE", "UTC")
 
 if not BOT_TOKEN:
     raise SystemExit("BOT_TOKEN environment variable is required!")
 
+# ---------------- API hosts ----------------
 FOOTBALL_HOST = "v3.football.api-sports.io"
-NBA_HOST = "v2.nba.api-sports.io"
+BASKETBALL_HOST = "v2.basketball.api-sports.io"
+TENNIS_HOST = "v1.tennis.api-sports.io"
 HEADERS = {"x-apisports-key": API_SPORTS_KEY} if API_SPORTS_KEY else {}
 
+# ---------------- Logging ----------------
 logging.basicConfig(level=getattr(logging, LOG_LEVEL, logging.INFO),
                     format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger("stakedrip")
 
-# ================= DB =================
+# ---------------- Database ----------------
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute("""
@@ -66,14 +85,24 @@ CREATE TABLE IF NOT EXISTS coupons (
     status TEXT
 )
 """)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS favorites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user TEXT,
+    team TEXT
+)
+""")
 conn.commit()
 
-# ================= MODEL =================
+# ---------------- Model ----------------
 MODEL_FILE = os.getenv("MODEL_FILE", "/tmp/model.pkl")
 SCALER_FILE = os.getenv("SCALER_FILE", "/tmp/scaler.pkl")
 
 def train_fallback_model():
     try:
+        import numpy as np
+        from sklearn.preprocessing import StandardScaler
+        from xgboost import XGBClassifier
         np.random.seed(42)
         X = np.column_stack([
             np.random.uniform(100,140,900),
@@ -99,7 +128,8 @@ def train_fallback_model():
 if MODEL_AVAILABLE:
     try:
         if not (os.path.exists(MODEL_FILE) and os.path.exists(SCALER_FILE)):
-            if not train_fallback_model():
+            ok = train_fallback_model()
+            if not ok:
                 MODEL_AVAILABLE = False
         if MODEL_AVAILABLE:
             model = joblib.load(MODEL_FILE)
@@ -116,15 +146,15 @@ def predict_probability(features: Optional[List[float]] = None) -> float:
                 features = [118,112,47.5,45.2,9,7]
             X = np.array([features])
             Xs = scaler.transform(X)
-            p = model.predict_proba(Xs)[0][1]*100
-            return round(float(p),1)
+            p = model.predict_proba(Xs)[0][1] * 100
+            return float(round(p,1))
     except Exception:
         logger.exception("Model failed; fallback.")
-    base = 50 + math.sin(datetime.utcnow().hour/24*2*math.pi)*10
+    base = 50 + (math.sin(datetime.utcnow().hour/24*2*math.pi) * 10)
     jitter = random.uniform(-8,8)
     return round(max(1, min(99, base + jitter)), 1)
 
-# ================= HELPERS =================
+# ---------------- Helpers ----------------
 def utcnow():
     return datetime.utcnow().replace(tzinfo=timezone.utc)
 
@@ -144,137 +174,117 @@ async def fetch_json_async(url: str, headers: dict=None, params: dict=None, time
     except Exception:
         return None
 
-# ================= LEAGUES =================
-TOP_FOOTBALL_LEAGUES = [
-    "Premier League","La Liga","Serie A","Bundesliga","Ligue 1",
-    "Süper Lig","1. Lig","2. Lig","Eredivisie","Primeira Liga",
-    "Championship","Ligue 2","Serie B","2. Bundesliga"
-]
-
-TOP_BASKETBALL_LEAGUES = [
-    "NBA","EuroLeague","Turkish Basketball Super League",
-    "Liga ACB","Legabasket Serie A","VTB United League"
-]
-
-TOP_TENNIS_TOURS = ["ATP","WTA","Grand Slam"]
-
-# ================= FETCH FIXTURES =================
-async def fetch_football_fixtures(): 
-    if not API_SPORTS_KEY: return None
+# ---------------- API Fetchers ----------------
+async def fetch_football_fixtures():
+    if not API_SPORTS_KEY:
+        return None
     url = f"https://{FOOTBALL_HOST}/fixtures"
     params = {"date": utcnow().strftime("%Y-%m-%d")}
     return await fetch_json_async(url, headers=HEADERS, params=params)
 
-async def fetch_nba_games():
-    if not API_SPORTS_KEY: return None
-    url = f"https://{NBA_HOST}/games"
+async def fetch_basketball_games():
+    if not API_SPORTS_KEY:
+        return None
+    url = f"https://{BASKETBALL_HOST}/games"
     params = {"date": utcnow().strftime("%Y-%m-%d")}
     return await fetch_json_async(url, headers=HEADERS, params=params)
 
-async def fetch_tennis_fixtures():
-    if not API_SPORTS_KEY: return None
-    url = f"https://v2.tennis.api-sports.io/matches"
+async def fetch_tennis_matches():
+    if not API_SPORTS_KEY:
+        return None
+    url = f"https://{TENNIS_HOST}/matches"
     params = {"date": utcnow().strftime("%Y-%m-%d")}
-    return await fetch_json_async(url, headers={"x-apisports-key": API_SPORTS_KEY}, params=params)
+    return await fetch_json_async(url, headers=HEADERS, params=params)
 
-# ================= NEON CARD =================
+# ---------------- Visual ----------------
 ASSET_FONT = os.path.join(os.path.dirname(__file__), "assets", "neon.ttf")
 def create_neon_card(title: str, subtitle: str, prob: float, footer: str="") -> io.BytesIO:
-    W,H=1200,520
-    bg=Image.new("RGBA",(W,H),(6,6,10,255))
-    txt=Image.new("RGBA",(W,H),(0,0,0,0))
-    draw=ImageDraw.Draw(txt)
+    W, H = 1200, 520
+    bg = Image.new("RGBA", (W,H), (6,6,10,255))
+    txt = Image.new("RGBA", (W,H), (0,0,0,0))
+    draw = ImageDraw.Draw(txt)
     try:
-        fbig=ImageFont.truetype(ASSET_FONT,72)
-        fmed=ImageFont.truetype(ASSET_FONT,32)
+        fbig = ImageFont.truetype(ASSET_FONT, 72)
+        fmed = ImageFont.truetype(ASSET_FONT, 32)
     except Exception:
         try:
-            fbig=ImageFont.truetype("DejaVuSans-Bold.ttf",64)
-            fmed=ImageFont.truetype("DejaVuSans.ttf",32)
+            fbig = ImageFont.truetype("DejaVuSans-Bold.ttf", 64)
+            fmed = ImageFont.truetype("DejaVuSans.ttf", 32)
         except Exception:
-            fbig=ImageFont.load_default()
-            fmed=ImageFont.load_default()
-    x,y=60,60
+            fbig = ImageFont.load_default()
+            fmed = ImageFont.load_default()
+    x,y = 60,60
     for o,a in [(16,28),(8,90),(4,200)]:
         draw.text((x+o,y+o), title, font=fbig, fill=(60,160,255,a))
     draw.text((x,y), title, font=fbig, fill=(190,240,255,255))
-    draw.text((x,y+110), subtitle, font=fmed, fill=(230,200,255,255))
-    bar_x,bar_y=x,H-140
-    bar_w=820
-    filled=int(bar_w*(prob/100.0))
-    draw.rectangle([bar_x,bar_y,bar_x+filled,bar_y+36], fill=(0,220,150,255))
-    draw.rectangle([bar_x+filled,bar_y,bar_x+bar_w,bar_y+36], fill=(255,80,80,160))
-    draw.text((bar_x+bar_w+20,bar_y-2), f"{prob}%", font=fmed, fill=(240,240,240,255))
+    draw.text((x, y+110), subtitle, font=fmed, fill=(230,200,255,255))
+    bar_x, bar_y = x, H-140
+    bar_w = 820
+    filled = int(bar_w * (prob/100.0))
+    draw.rectangle([bar_x, bar_y, bar_x+filled, bar_y+36], fill=(0,220,150,255))
+    draw.rectangle([bar_x+filled, bar_y, bar_x+bar_w, bar_y+36], fill=(255,80,80,160))
+    draw.text((bar_x+bar_w+20, bar_y-2), f"{prob}%", font=fmed, fill=(240,240,240,255))
     if footer:
-        draw.text((x,H-60), footer, font=fmed, fill=(180,180,200,200))
-    glow=txt.filter(ImageFilter.GaussianBlur(4))
-    combined=Image.alpha_composite(bg,glow)
-    combined=Image.alpha_composite(combined,txt)
-    buf=io.BytesIO()
-    combined.convert("RGB").save(buf,"PNG", optimize=True)
+        draw.text((x, H-60), footer, font=fmed, fill=(180,180,200,200))
+    glow = txt.filter(ImageFilter.GaussianBlur(4))
+    combined = Image.alpha_composite(bg, glow)
+    combined = Image.alpha_composite(combined, txt)
+    buf = io.BytesIO()
+    combined.convert("RGB").save(buf, "PNG", optimize=True)
     buf.seek(0)
     return buf
 
-# ================= COLLECT MATCHES =================
+# ---------------- Match Collection ----------------
 async def collect_upcoming_matches(window_hours: int=12) -> List[Tuple[str,str,datetime,str]]:
-    now=utcnow()
-    cutoff=now+timedelta(hours=window_hours)
-    matches=[]
-
-    fb=await fetch_football_fixtures()
+    now = utcnow()
+    cutoff = now + timedelta(hours=window_hours)
+    matches = []
+    # --- Football ---
+    fb = await fetch_football_fixtures()
     if fb and fb.get("response"):
         for f in fb["response"]:
             try:
-                league=f["league"]["name"]
-                if league not in TOP_FOOTBALL_LEAGUES: continue
-                start=datetime.fromisoformat(f["fixture"]["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
-                if now<start<cutoff:
-                    home=f["teams"]["home"]["name"]
-                    away=f["teams"]["away"]["name"]
-                    mid=str(f["fixture"]["id"])
-                    matches.append((f"{away} vs {home}", "FUTBOL", start, mid))
+                start = datetime.fromisoformat(f["fixture"]["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                if now < start < cutoff:
+                    home = f["teams"]["home"]["name"]
+                    away = f["teams"]["away"]["name"]
+                    mid = str(f["fixture"]["id"])
+                    league = f["league"]["name"]
+                    if league in ["Premier League","La Liga","Serie A","Bundesliga","Ligue 1","Süper Lig","1. Lig","2. Lig"]:  # üst ve ikinci ligler
+                        matches.append((f"{away} vs {home}", "FUTBOL", start, mid))
             except Exception:
                 continue
-
-    nb=await fetch_nba_games()
+    # --- Basketball ---
+    nb = await fetch_basketball_games()
     if nb and nb.get("response"):
         for g in nb["response"]:
             try:
-                league=g.get("league") or g.get("league_name") or ""
-                if league not in TOP_BASKETBALL_LEAGUES and "NBA" not in league: continue
-                start=datetime.fromisoformat(g["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
-                home=g["teams"]["home"]["name"]
-                away=g["teams"]["visitors"]["name"]
-                gid=str(g.get("id") or g.get("gameId") or "")
-                matches.append((f"{away} @ {home}","BASKETBOL",start,gid))
+                start = datetime.fromisoformat(g["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                if now < start < cutoff:
+                    home = g["teams"]["home"]["name"]
+                    away = g["teams"]["visitors"]["name"]
+                    gid = str(g.get("id") or g.get("gameId") or "")
+                    league = g.get("league", {}).get("name", "")
+                    if league in ["NBA","EuroLeague","BSL","LNB Pro A","Liga ACB","Serie A"]:  # önemli basketbol ligleri
+                        matches.append((f"{away} @ {home}", "BASKETBOL", start, gid))
             except Exception:
                 continue
-
-    tn=await fetch_tennis_fixtures()
+    # --- Tennis ---
+    tn = await fetch_tennis_matches()
     if tn and tn.get("response"):
-        for t in tn["response"]:
+        for m in tn["response"]:
             try:
-                tour=t.get("tournament") or ""
-                if tour not in TOP_TENNIS_TOURS: continue
-                start=datetime.fromisoformat(t["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
-                p1=t["players"]["player1"]["name"]
-                p2=t["players"]["player2"]["name"]
-                tid=str(t.get("id") or "")
-                matches.append((f"{p1} vs {p2}","TENIS",start,tid))
+                start = datetime.fromisoformat(m["date"].replace("Z","+00:00")).replace(tzinfo=timezone.utc)
+                if now < start < cutoff:
+                    players = f"{m['players'][0]['name']} vs {m['players'][1]['name']}"
+                    mid = str(m.get("id") or "")
+                    matches.append((players, "TENIS", start, mid))
             except Exception:
                 continue
-
-    matches.sort(key=lambda x:x[2])
+    matches.sort(key=lambda x: x[2])
     return matches
 
-# ================= DEVAM =================
-# Buradan itibaren:
-# send_hourly_predictions, send_daily_coupon, update_match_results_from_api
-# Telegram komutları (/start, /yardim, /tahmin, /kupon, /sonuclar, /istatistik, /trend, /surpriz, /admin)
-# schedule_jobs, admin_notify, get_accuracy, main()
-# daha önce verdiğim sürümle birebir aynıdır ve hatasızdır.
-
-# ---------------- HOURLY PREDICTIONS ----------------
+# ---------------- Send Predictions ----------------
 async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Hourly prediction job running...")
     try:
@@ -289,15 +299,11 @@ async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
                 date_str = start_dt.strftime("%Y-%m-%d")
                 existing = cursor.execute("SELECT 1 FROM results WHERE match=? AND date=?", (match_str, date_str)).fetchone()
                 if existing:
+                    logger.debug("Already exists: %s", match_str)
                     continue
                 prob = predict_probability()
                 stake = min(10, max(1, int(prob/10)))
-                if " vs " in match_str:
-                    winner = match_str.split(" vs ")[1] if prob > 50 else match_str.split(" vs ")[0]
-                elif "@" in match_str:
-                    winner = match_str.split("@")[1].strip() if prob > 50 else match_str.split("@")[0].strip()
-                else:
-                    winner = match_str
+                winner = match_str.split(" vs ")[1] if " vs " in match_str else (match_str.split("@")[1].strip() if "@" in match_str else match_str)
                 tag = "KAZANIR" if prob > 60 else "SÜRPRİZ"
                 pred_text = f"{winner} {tag}"
                 sent_time = datetime.utcnow().strftime("%H:%M")
@@ -309,13 +315,14 @@ async def send_hourly_predictions(context: ContextTypes.DEFAULT_TYPE):
                 caption = (f"<b>STAKEZONE TAHMİNİ</b>\nMaç: <code>{match_str}</code>\nTahmin: <b>{pred_text}</b>\nWin Rate: <code>{prob}%</code>\nStake: <code>{stake}/10</code>\nDoğruluk: <code>%{get_accuracy()}</code>\nZaman: <code>{start_dt.strftime('%H:%M UTC')}</code>\n\nt.me/stakedrip")
                 try:
                     await context.bot.send_photo(CHANNEL_ID, photo=InputFile(card, filename="stake_card.png"), caption=caption, parse_mode="HTML")
+                    logger.info("Sent prediction for %s", match_str)
                 except Exception:
                     logger.exception("Failed to send photo for %s", match_str)
                 break
     except Exception:
         logger.exception("Hourly predictions job failed.")
 
-# ---------------- DAILY COUPON ----------------
+# ---------------- Daily Coupon ----------------
 def prob_to_odd(p: float) -> float:
     fair = max(1.01, round(100.0 / max(1.0, p), 2))
     return round(fair + 0.02, 2)
@@ -349,7 +356,7 @@ async def send_daily_coupon(context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Failed to send daily coupon.")
 
-# ---------------- RESULT CHECK ----------------
+# ---------------- Result Update ----------------
 def update_match_results_from_api():
     logger.info("Checking results for BEKLENIYOR matches...")
     rows = cursor.execute("SELECT id, match, game_id FROM results WHERE status='BEKLENIYOR'").fetchall()
@@ -389,6 +396,35 @@ def update_match_results_from_api():
             time.sleep(0.3)
         except Exception:
             logger.exception("Error checking fixture %s", game_id)
+
+# ---------------- Commands ----------------
+async def start_cmd(update, context):
+    txt = ("⚡️ StakeDrip Pro aktif.\nKomutlar:\n/tahmin /kupon /sonuclar /istatistik /trend /surpriz /favori /alert\nAdmin: /admin mark <id> <KAZANDI|KAYBETTI>")
+    await update.message.reply_text(txt)
+
+async def yardim_cmd(update, context):
+    await start_cmd(update, context)
+
+async def tahmin_cmd(update, context):
+    matches = await collect_upcoming_matches(window_hours=6)
+    if not matches:
+        await update.message.reply_text("Yakın maç bulunamadı.")
+        return
+    match_str, sport, start_dt, game_id = matches[0]
+    prob = predict_probability()
+    stake = min(10, max(1, int(prob/10)))
+    winner = match_str.split(" vs ")[1] if " vs " in match_str else (match_str.split("@")[1].strip() if "@" in match_str else match_str)
+    tag = "KAZANIR" if prob > 60 else "SÜRPRİZ"
+    pred_text = f"{winner} {tag}"
+    date_str = start_dt.strftime("%Y-%m-%d")
+    cursor.execute("INSERT INTO results (created_at, date, sport, match, prediction, stake, prob, sent_time, game_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   (utcnow().isoformat(), date_str, sport, match_str, pred_text, stake, prob, utcnow().strftime("%H:%M"), game_id, "BEKLENIYOR"))
+    conn.commit()
+    card = create_neon_card("StakeDrip Tahmin (Manuel)", match_str, prob, footer="t.me/stakedrip")
+    caption = (f"🎯 <b>Manuel Tahmin de</b>\nMaç: <code>{match_str}</code>\nTahmin: <b>{pred_text}</b>\nWin Rate: <code>{prob}%</code>\nStake: <code>{stake}/10</code>")
+    await update.message.reply_photo(photo=card, caption=caption, parse_mode="HTML")
+
+# (Diğer komutlar: kupon, sonuclar, istatistik, trend, surpriz, admin)...
 
 # ---------------- TELEGRAM HANDLER REGISTRATION ----------------
 def register_handlers(app):
