@@ -519,11 +519,11 @@ async def start_bot():
         logger.exception("❌ Ana uygulama çalışırken hata oluştu.")
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # Mevcut event loop üzerinde botu başlat
+    try:
+        loop = asyncio.get_running_loop()
+        # Eğer loop zaten çalışıyorsa, mevcut loop üzerinde başlat
         asyncio.create_task(start_bot())
         logger.info("✅ Bot başlatıldı (mevcut loop üzerinde).")
-    else:
-        # Yeni loop oluştur ve çalıştır
-        loop.run_until_complete(start_bot())
+    except RuntimeError:
+        # Eğer loop yoksa, yeni loop oluşturup çalıştır
+        asyncio.run(start_bot())
