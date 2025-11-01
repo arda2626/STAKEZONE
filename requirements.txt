@@ -1,8 +1,4 @@
-python-telegram-bot==20.5
+python-telegram-bot==20.6
+python-dotenv
 requests
-pillow
-joblib
-numpy
-scikit-learn
-xgboost
-matplotlib
+asyncio
