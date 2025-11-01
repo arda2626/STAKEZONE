@@ -559,11 +559,30 @@ def get_accuracy() -> float:
 def main():
     try:
         logger.info("🚀 StakeDrip Pro başlatılıyor...")
+
+        # Telegram uygulaması
         app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+        # Komutları kaydet
         register_handlers(app)
-        app.job_queue.run_once(lambda ctx: asyncio.create_task(schedule_jobs(app)), 1)
+
+        # JobQueue planlaması
+        async def init_jobs():
+            # Webhook varsa kaldır
+            try:
+                await app.bot.delete_webhook(drop_pending_updates=True)
+                logger.info("✅ Mevcut webhook silindi.")
+            except Exception:
+                logger.warning("Webhook silinirken sorun oluştu; devam ediliyor.")
+            # JobQueue çalıştır
+            await schedule_jobs(app)
+
+        # JobQueue başlat
+        app.job_queue.run_once(lambda ctx: asyncio.create_task(init_jobs()), 1)
+
+        # Bot polling (tek instance)
         logger.info("✅ Başlatma tamamlandı — bot çalışıyor.")
-        app.run_polling()
+        app.run_polling(drop_pending_updates=True)
     except Exception:
         logger.exception("❌ Ana uygulama çalışırken hata oluştu.")
 
