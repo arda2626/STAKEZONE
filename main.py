@@ -11,11 +11,11 @@ logging.basicConfig(level=logging.INFO, format="%(H:%M:%S) | %(levelname)-8s | %
 log = logging.getLogger(__name__)
 
 # ----------------- TELEGRAM CONFIG -----------------
-TELEGRAM_TOKEN = "BOT_TOKENINIZI_BURAYA"
-CHANNEL_ID = "@KANALINIZ"
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
+CHANNEL_ID = "@stakedrip"
 
 # ----------------- API CONFIG -----------------
-THESPORTSDB_KEY = "API_KEYINIZ"
+THESPORTSDB_KEY = "457761c3fe3072466a8899578fefc5e4"
 TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
 
 # ----------------- UTILS -----------------
