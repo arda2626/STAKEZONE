@@ -1,7 +1,16 @@
 # prediction.py
-import random
 from utils import ensure_min_odds, calc_form_score, combine_confidence, utcnow
 
+def ai_for_match(match):
+    odds = match.get("odds", 1.0)
+    confidence = match.get("confidence", 0.5)
+    odds = ensure_min_odds(odds)
+    return {
+        "match_id": match.get("id"),
+        "prediction": "1" if confidence > 0.5 else "2",
+        "odds": odds,
+        "confidence": confidence
+    }
 NBA_PLAYERS = ["LeBron James","Stephen Curry","Jayson Tatum","Giannis Antetokounmpo","Luka Doncic","Kevin Durant","Devin Booker","Nikola Jokic","Shai Gilgeous-Alexander"]
 
 def ai_for_match(ev):
