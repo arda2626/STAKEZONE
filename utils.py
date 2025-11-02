@@ -1,6 +1,21 @@
 # utils.py
 from datetime import datetime, timezone, timedelta
+# utils.py
 
+import datetime
+
+def ensure_min_odds(odds, min_odds=1.2):
+    return max(odds, min_odds)
+
+def calc_form_score(team_stats):
+    # Örnek form skoru
+    return sum(team_stats)/len(team_stats) if team_stats else 0
+
+def combine_confidence(*args):
+    return sum(args)/len(args) if args else 0
+
+def utcnow():
+    return datetime.datetime.utcnow()
 # ---------------- EMOJI ----------------
 EMOJI = {
     "futbol":"⚽","nba":"🏀","tenis":"🎾","ding":"🔔","cash":"💰",
