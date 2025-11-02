@@ -4,9 +4,11 @@ from datetime import datetime, timezone
 from telegram import Bot
 
 # ----------------- LOGGING -----------------
-logging.basicConfig(level=logging.INFO,
-                    format="%(H:%M:%S) | %(levelname)-8s | %(message)s")
-log = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%H:%M:%S"
+)
 
 # ----------------- CONFIG -----------------
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
