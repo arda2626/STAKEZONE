@@ -1,63 +1,48 @@
 # utils.py
 from datetime import datetime, timezone, timedelta
-# utils.py
 
-import datetime
-
+# ---------------- BASIC HELPERS ----------------
 def ensure_min_odds(odds, min_odds=1.2):
     return max(odds, min_odds)
 
 def calc_form_score(team_stats):
-    # Örnek form skoru
     return sum(team_stats)/len(team_stats) if team_stats else 0
 
 def combine_confidence(*args):
     return sum(args)/len(args) if args else 0
 
 def utcnow():
-    return datetime.datetime.utcnow()
-# ---------------- EMOJI ----------------
+    return datetime.now(timezone.utc)
+
+def turkey_now():
+    return datetime.now(timezone(timedelta(hours=3)))
+
+# ---------------- EMOJI & BANNER ----------------
 EMOJI = {
     "futbol":"⚽","nba":"🏀","tenis":"🎾","ding":"🔔","cash":"💰",
     "win":"✅","lose":"❌","clock":"🕒","cup":"🏆","info":"ℹ️"
 }
 
-# ---------------- BANNER ----------------
 def banner(title_short="LIVE"):
     return "\n".join(["═"*38, "💎 STAKEDRIP LIVE PICKS 💎", f"🔥 AI CANLI TAHMİN ({title_short}) 🔥", "═"*38])
 
 # ---------------- COUNTRY / LEAGUE EMOJI MAP ----------------
 EMOJI_MAP = {
-    # Türkiye & Süper Lig
     "turkey":"🇹🇷","süper lig":"🇹🇷","super lig":"🇹🇷",
-    # İngiltere
     "england":"🏴","premier league":"🏴",
-    # İspanya
     "spain":"🇪🇸","laliga":"🇪🇸","la liga":"🇪🇸",
-    # İtalya
     "italy":"🇮🇹","serie a":"🇮🇹",
-    # Almanya
     "germany":"🇩🇪","bundesliga":"🇩🇪",
-    # Fransa
     "france":"🇫🇷","ligue 1":"🇫🇷",
-    # Portekiz, Hollanda, Belçika
     "portugal":"🇵🇹","netherlands":"🇳🇱","belgium":"🇧🇪",
-    # İskoçya, İskandinav
     "scotland":"🏴","sweden":"🇸🇪","norway":"🇳🇴","denmark":"🇩🇰",
-    # Polonya, İsviçre, Avusturya
     "poland":"🇵🇱","switzerland":"🇨🇭","austria":"🇦🇹",
-    # Rusya, Ukrayna
     "russia":"🇷🇺","ukraine":"🇺🇦",
-    # Amerika kıtası
     "usa":"🇺🇸","mls":"🇺🇸","canada":"🇨🇦","mexico":"🇲🇽","brazil":"🇧🇷","argentina":"🇦🇷",
-    # Asya & Okyanusya
     "japan":"🇯🇵","korea":"🇰🇷","china":"🇨🇳","australia":"🇦🇺","saudi":"🇸🇦","qatar":"🇶🇦",
-    # Afrika
     "egypt":"🇪🇬","morocco":"🇲🇦","south africa":"🇿🇦","nigeria":"🇳🇬","ghana":"🇬🇭",
-    # Kupalar & Uluslararası
     "conmebol":"🌎","concacaf":"🌎","caf":"🌍","uefa":"🇪🇺","champions league":"🏆",
     "europa league":"🇪🇺","fifa":"🌍",
-    # Basketbol & Tenis
     "nba":"🇺🇸🏀","euroleague":"🏀🇪🇺","atp":"🎾","wta":"🎾","itf":"🎾"
 }
 
@@ -78,6 +63,36 @@ def league_to_flag(league_name):
             return EMOJI_MAP.get(mapped, "🏟️")
     return "🏟️"
 
-# ---------------- TIME HELPERS ----------------
-def utcnow(): return datetime.now(timezone.utc)
-def turkey_now(): return datetime.now(timezone(timedelta(hours=3)))
+# ---------------- PREDICTION STORAGE ----------------
+# Hafızada saklamak için basit liste
+PREDICTIONS_DB = []
+
+def save_prediction(prediction: dict):
+    PREDICTIONS_DB.append(prediction)
+
+def mark_prediction(pred_id, status, result):
+    for p in PREDICTIONS_DB:
+        if p.get("id") == pred_id:
+            p["status"] = status
+            p["result"] = result
+            break
+
+def get_pending_predictions():
+    return [p for p in PREDICTIONS_DB if p.get("status") is None]
+
+def day_summary_between(start_iso, end_iso):
+    start = datetime.fromisoformat(start_iso)
+    end = datetime.fromisoformat(end_iso)
+    counts = {"won":0,"lost":0,"pending":0,"unknown":0}
+    for p in PREDICTIONS_DB:
+        created_at = datetime.fromisoformat(p.get("created_at"))
+        if start <= created_at <= end:
+            status = p.get("status") or "pending"
+            counts[status] = counts.get(status,0)+1
+    return counts.items()
+
+def build_live_text(predictions):
+    lines = []
+    for p in predictions:
+        lines.append(f"{p.get('home')} vs {p.get('away')} • Tahmin: {p.get('bet_text','')} • Oran: {p.get('odds')}")
+    return "\n".join(lines)
