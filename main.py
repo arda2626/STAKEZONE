@@ -1,13 +1,31 @@
 # main.py
 import asyncio
-import logging
-import nest_asyncio
-from telegram.ext import Application
-from db import init_db
 from scheduler import hourly_live, daily_coupon, weekly_coupon, kasa_coupon, check_results, daily_summary
-from config import TELEGRAM_TOKEN, LIVE_INTERVAL_SECONDS
-from utils import utcnow
+import datetime
 
+matches = [
+    {"id": 1, "live": True, "odds": 1.5, "confidence": 0.8, "start_time": datetime.datetime.utcnow()},
+    {"id": 2, "live": True, "odds": 1.3, "confidence": 0.6, "start_time": datetime.datetime.utcnow()},
+    {"id": 3, "live": False, "odds": 1.7, "confidence": 0.9, "start_time": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
+]
+
+async def main():
+    print("Hourly Live Predictions:")
+    print(await hourly_live(matches))
+
+    print("\nDaily Coupon Predictions:")
+    print(await daily_coupon(matches))
+
+    print("\nWeekly Coupon Predictions:")
+    print(await weekly_coupon(matches))
+
+    print("\nKasa Coupon Predictions:")
+    print(await kasa_coupon(matches))
+
+    print("\nFinished Matches Check:")
+    print(await check_results(matches))
+
+asyncio.run(main())
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
