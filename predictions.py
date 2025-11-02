@@ -1,25 +1,20 @@
-from utils import EMOJI, league_to_flag, utcnow
-from db import save_prediction
-from messages import post_prediction
-from config import MIN_ODDS
+import random
+from utils import EMOJI
 
-async def make_prediction(match):
+# ================== ÖRNEK PREDİKSİYON ÜRET ==================
+def generate_prediction(sport="futbol"):
     """
-    match = {
-        'event_id': str,
-        'sport': 'futbol'|'nba'|'tenis',
-        'league': str,
-        'home': str,
-        'away': str,
-        'bet': str,
-        'odds': float,
-        'prob': int
-    }
+    sport: futbol, nba, tenis
     """
-    if match['odds'] < MIN_ODDS: 
-        return None
-    match['created_at'] = utcnow().isoformat()
-    msg_id = await post_prediction(match)
-    match['msg_id'] = msg_id
-    save_prediction(match)
-    return match
+    if sport == "futbol":
+        choices = ["1", "2", "X", "KG", "Üst", "Alt"]
+    elif sport == "nba" or sport == "basketball":
+        choices = ["1", "2", "Üst", "Alt"]
+    elif sport == "tenis":
+        choices = ["1", "2", "Üst", "Alt"]
+    else:
+        choices = ["1", "2", "X"]
+    
+    prediction = random.choice(choices)
+    odds = round(random.uniform(1.50, 2.50), 2)
+    return {"prediction": prediction, "odds": odds, "sport": sport}
