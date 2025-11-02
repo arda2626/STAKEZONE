@@ -1,4 +1,11 @@
-# scheduler.py
+# scheduler.py en başına ekle
+import os
+
+THESPORTSDB_KEY = os.getenv("THESPORTSDB_KEY")
+if not THESPORTSDB_KEY:
+    raise ValueError("THESPORTSDB_KEY ortam değişkeni tanımlı değil!")
+
+TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
 import datetime
 import logging
 from prediction import ai_for_match
