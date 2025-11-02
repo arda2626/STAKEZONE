@@ -139,49 +139,42 @@ AT_HEADERS = {"x-apisports-key": API_TENNIS_KEY} if API_TENNIS_KEY else None
 TSDB_BASE = "https://www.thesportsdb.com/api/v1/json"
 TSDB_KEY = THESPORTSDB_KEY
 
-async def af_get(session, path, params=None):
-    if not API_FOOTBALL_KEY: return None
+# --------------- 2 API DESTEKLİ ÇEKİM (AYNI ANDA) -----------------
+async def fetch_from_api(session, sport):
+    events = []
     try:
-        url = AF_BASE + path
-        async with session.get(url, headers=AF_HEADERS, params=params, timeout=aiohttp.ClientTimeout(total=12)) as r:
-            if r.status == 200:
-                return await r.json()
+        if sport=="football":
+            # API-Football
+            if API_FOOTBALL_KEY:
+                res1 = await af_get(session, "/fixtures", {"live":"all"})
+                if res1 and res1.get("response"):
+                    events += res1["response"]
+            # fallback: TheSportsDB
+            if TSDB_KEY:
+                res2 = await tsdb_get(session, "eventslive.php")
+                if res2 and res2.get("event"):
+                    events += res2["event"]
+        elif sport=="basketball":
+            if API_BASKETBALL_KEY:
+                res1 = await ab_get(session, "/games", {"live":"all"})
+                if res1 and res1.get("response"):
+                    events += res1["response"]
+            if TSDB_KEY:
+                res2 = await tsdb_get(session, "eventslive.php")
+                if res2 and res2.get("event"):
+                    events += res2["event"]
+        elif sport=="tennis":
+            if API_TENNIS_KEY:
+                res1 = await at_get(session, "/fixtures", {"status":"LIVE"})
+                if res1 and res1.get("response"):
+                    events += res1["response"]
+            if TSDB_KEY:
+                res2 = await tsdb_get(session, "eventslive.php")
+                if res2 and res2.get("event"):
+                    events += res2["event"]
     except Exception as e:
-        log.debug(f"af_get error: {e}")
-    return None
-
-async def ab_get(session, path, params=None):
-    if not API_BASKETBALL_KEY: return None
-    try:
-        url = AB_BASE + path
-        async with session.get(url, headers=AB_HEADERS, params=params, timeout=aiohttp.ClientTimeout(total=12)) as r:
-            if r.status == 200:
-                return await r.json()
-    except Exception as e:
-        log.debug(f"ab_get error: {e}")
-    return None
-
-async def at_get(session, path, params=None):
-    if not API_TENNIS_KEY: return None
-    try:
-        url = AT_BASE + path
-        async with session.get(url, headers=AT_HEADERS, params=params, timeout=aiohttp.ClientTimeout(total=12)) as r:
-            if r.status == 200:
-                return await r.json()
-    except Exception as e:
-        log.debug(f"at_get error: {e}")
-    return None
-
-async def tsdb_get(session, path, params=None):
-    if not TSDB_KEY: return None
-    try:
-        url = f"{TSDB_BASE}/{TSDB_KEY}/{path}"
-        async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=12)) as r:
-            if r.status == 200:
-                return await r.json()
-    except Exception as e:
-        log.debug(f"tsdb_get error: {e}")
-    return None
+        log.debug(f"fetch_from_api error ({sport}): {e}")
+    return events
 
 # ---------------- PREDICTION ENGINE (STRICT: require stats) ----------------
 NBA_PLAYERS = ["LeBron James","Stephen Curry","Jayson Tatum","Giannis Antetokounmpo","Luka Doncic","Kevin Durant","Devin Booker","Nikola Jokic","Shai Gilgeous-Alexander"]
@@ -221,20 +214,7 @@ async def get_team_form_af(session, team_id):
         log.debug(f"get_team_form_af error: {e}")
         return None
 
-async def make_prediction(session, ev):
-    """
-    Strict behavior:
-    - If required stats for sport are NOT obtainable => return None (skip)
-    - If stats exist, produce prediction dict
-    """
-    # normalize fields
-    sport_raw = (ev.get("sport") or ev.get("strSport") or "").lower()
-    event_id = ev.get("id") or ev.get("idEvent") or (ev.get("fixture") and ev["fixture"].get("id"))
-    league = ev.get("league") or ev.get("strLeague") or ev.get("league_name") or ""
-    home = ev.get("home") or ev.get("strHomeTeam") or (ev.get("teams") and ev.get("teams").get("home",{}).get("name"))
-    away = ev.get("away") or ev.get("strAwayTeam") or (ev.get("teams") and ev.get("teams").get("away",{}).get("name"))
-
-    # ---------------- FOOTBALL (require last-form for both teams) ----------------
+ # ---------------- FOOTBALL (require last-form for both teams) ----------------
     if "football" in sport_raw or "soccer" in sport_raw:
         if not API_FOOTBALL_KEY:
             # without API-Football, we don't attempt predictions (strict)
