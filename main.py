@@ -1,4 +1,4 @@
-# main.py – %100 ÇALIŞIR | 35+ LİG | BANNER + 3 CANLI + KUPONLAR
+# main.py – CANLI ORAN ≥1.20 | BASKET & TENİS ALT/ÜST | 35+ LİG
 import asyncio, random, aiohttp, logging, os, sys
 from datetime import datetime, timedelta, time, timezone
 from telegram import Update
@@ -13,14 +13,14 @@ ODDS_KEY = os.getenv("ODDS_API_KEY")
 CHANNEL = os.getenv("CHANNEL", "@stakedrip")
 
 if not all([TOKEN, ODDS_KEY]):
-    log.error("TELEGRAM_TOKEN veya ODDS_API_KEY eksik!")
+    log.error("TOKEN veya ODDS_KEY eksik!")
     sys.exit(1)
 
-log.info(" SÜPER BOT AKTİF – 35+ LİG + EMOJİ")
+log.info(" BOT AKTİF – ORAN ≥1.20 + ALT/ÜST")
 
 # ====================== 35+ LİG ======================
 LEAGUES = [
-    # FUTBOL (35+)
+    # FUTBOL
     "soccer_turkey_super_league","soccer_turkey_1_lig","soccer_epl","soccer_efl_champ",
     "soccer_spain_la_liga","soccer_spain_segunda","soccer_italy_serie_a","soccer_italy_serie_b",
     "soccer_france_ligue_one","soccer_france_ligue_two","soccer_germany_bundesliga","soccer_germany_bundesliga2",
@@ -42,7 +42,7 @@ LEAGUES = [
 EMOJI = {"football":"⚽","basketball":"🏀","tennis":"🎾","live":"🔥","win":"✅","lose":"❌","coupon":"🎟️","kasa":"💰"}
 
 WINS = LOSSES = 0
-PREDS = []  # {id, home, away, bet, oran}
+PREDS = []
 
 BANNER = [
     "══════════════════════════",
@@ -78,33 +78,49 @@ async def fetch_odds():
             except: pass
     return matches
 
-# ====================== TAHMİN ======================
+# ====================== TAHMİN (ORAN ≥1.20) ======================
 def predict(m):
     book = m.get("bookmakers", [{}])[0]
     h2h = next((x for x in book.get("markets",[]) if x["key"]=="h2h"), None)
-    if not h2h: return None
-    o = h2h["outcomes"]
-    home = next((x for x in o if x["name"]==m["home_team"]), None)
-    away = next((x for x in o if x["name"]==m["away_team"]), None)
-    if not home or not away: return None
+    totals = next((x for x in book.get("markets",[]) if x["key"]=="totals"), None)
 
-    ph = 1/home["price"]
-    pa = 1/away["price"]
-    tot = next((x for x in book.get("markets",[]) if x["key"]=="totals"), None)
-    over = next((x for x in tot["outcomes"] if "Over" in x["name"]) if tot else None, None)
+    # H2H
+    outcomes = h2h["outcomes"] if h2h else []
+    home = next((x for x in outcomes if x["name"]==m["home_team"]), None)
+    away = next((x for x in outcomes if x["name"]==m["away_team"]), None)
+    ph = 1/home["price"] if home else 0
+    pa = 1/away["price"] if away else 0
+
+    # TOTALS (Basket & Tenis için)
+    over = under = None
+    if totals:
+        over = next((x for x in totals["outcomes"] if "Over" in x["name"]), None)
+        under = next((x for x in totals["outcomes"] if "Under" in x["name"]), None)
     p_over = 1/over["price"] if over else 0
+    p_under = 1/under["price"] if under else 0
+
+    # KG VAR
     kg = 0.65 if ph>0.28 and pa>0.28 else 0.33
 
-    bets = [
-        ("1", ph, home["price"]),
-        ("2", pa, away["price"]),
-        ("ÜST", p_over, over["price"] if over else 0),
-        ("KG VAR", kg, round(1/kg,2)),
-    ]
-    valid = [(n,p,r) for n,p,r in bets if p>=0.55 and r>1.0]
+    bets = []
+    if "soccer" in m["code"]:
+        bets = [
+            ("1", ph, home["price"] if home else 0),
+            ("2", pa, away["price"] if away else 0),
+            ("ÜST", p_over, over["price"] if over else 0),
+            ("KG VAR", kg, round(1/kg,2)),
+        ]
+    else:  # Basket & Tenis
+        bets = [
+            ("ÜST", p_over, over["price"] if over else 0),
+            ("ALT", p_under, under["price"] if under else 0),
+        ]
+
+    # SADECE ORAN ≥1.20
+    valid = [(n,p,r) for n,p,r in bets if p>=0.55 and r>=1.20]
     if not valid: return None
     n,p,r = max(valid, key=lambda x:x[1])
-    return {"bet":n, "oran":round(r+random.uniform(-0.04,0.05),2), "prob":int(p*100)}
+    return {"bet":n, "oran":round(r+random.uniform(-0.03,0.04),2), "prob":int(p*100)}
 
 # ====================== 1. SAATLİK 3 CANLI ======================
 async def hourly_live(ctx: ContextTypes.DEFAULT_TYPE):
@@ -144,7 +160,7 @@ async def hourly_live(ctx: ContextTypes.DEFAULT_TYPE):
 
     await ctx.bot.send_message(CHANNEL, "\n".join(lines), parse_mode="Markdown")
 
-# ====================== 2. GÜNLÜK KUPON (12 SAAT) ======================
+# ====================== 2. GÜNLÜK KUPON ======================
 async def daily_coupon(ctx):
     ms = await fetch_odds()
     future = [m for m in ms if datetime.fromisoformat(m["commence_time"].rstrip("Z")+"+00:00") > datetime.now(timezone.utc) + timedelta(hours=1)]
@@ -186,7 +202,7 @@ async def weekly_coupon(ctx):
     lines.append(f" TOPLAM ORAN: **{total:.2f}**")
     await ctx.bot.send_message(CHANNEL, "\n".join(lines), parse_mode="Markdown")
 
-# ====================== 4. KASA KUPONU (24 SAAT – MİN 2.00) ======================
+# ====================== 4. KASA KUPONU (24 SAAT) ======================
 async def kasa_coupon(ctx):
     ms = await fetch_odds()
     future = [m for m in ms if datetime.fromisoformat(m["commence_time"].rstrip("Z")+"+00:00") > datetime.now(timezone.utc)]
@@ -196,13 +212,13 @@ async def kasa_coupon(ctx):
     while total < 2.0 and future and attempts < 100:
         m = random.choice(future)
         p = predict(m)
-        if p and p["oran"] > 1.3:
+        if p and p["oran"] >= 1.20:
             sel.append((m, p))
             total *= p["oran"]
         future.remove(m)
         attempts += 1
     if total < 2.0 or len(sel) < 2: return
-    lines = [f"{EMOJI['kasa']} KASA KUPONU (24 SAAT)", "────────────────────"]
+    lines = [f"{EMOJI['kasa']} KASA KUPONU", "────────────────────"]
     for i, (m, p) in enumerate(sel, 1):
         emoji = EMOJI["football"] if "soccer" in m["code"] else EMOJI["basketball"] if "basketball" in m["code"] else EMOJI["tennis"]
         lines += [
@@ -213,7 +229,7 @@ async def kasa_coupon(ctx):
     lines.append(f" TOPLAM ORAN: **{total:.2f}**")
     await ctx.bot.send_message(CHANNEL, "\n".join(lines), parse_mode="Markdown")
 
-# ====================== 5. KAZANDI / KAYBETTİ ======================
+# ====================== 5. SONUÇ KONTROL ======================
 async def check_results(ctx):
     global WINS, LOSSES, PREDS
     today = datetime.now().strftime("%Y-%m-%d")
@@ -233,7 +249,7 @@ async def check_results(ctx):
         win = (
             (pred["bet"] == "1" and h > a) or
             (pred["bet"] == "2" and a > h) or
-            (pred["bet"] == "ÜST" and h + a > 2) or
+            (pred["bet"] in ["ÜST", "ALT"] and (("ÜST" in pred["bet"] and h + a > 2) or ("ALT" in pred["bet"] and h + a < 3))) or
             (pred["bet"] == "KG VAR" and h > 0 and a > 0)
         )
         emoji = EMOJI['win'] if win else EMOJI['lose']
@@ -248,18 +264,13 @@ def main():
     app.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text("Bot aktif!")))
 
     job = app.job_queue
-    # Her saat başı 3 canlı
     job.run_repeating(hourly_live, interval=3600, first=15)
-    # Her 12 saatte günlük
     job.run_repeating(daily_coupon, interval=12*3600, first=90)
-    # Her Perşembe 10:00 haftalık
     job.run_daily(weekly_coupon, time=time(10, 0), days=(3,))
-    # Her 24 saatte kasa
     job.run_repeating(kasa_coupon, interval=24*3600, first=120)
-    # Her 5 dakikada sonuç
     job.run_repeating(check_results, interval=300, first=30)
 
-    log.info("BOT ÇALIŞIYOR → TÜM İSTEKLER TAMAM!")
+    log.info("BOT ÇALIŞIYOR – ORAN ≥1.20 + ALT/ÜST")
     app.run_polling()
 
 if __name__ == "__main__":
