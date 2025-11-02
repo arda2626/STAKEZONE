@@ -1,17 +1,20 @@
-# messages.py
-from utils import EMOJI, league_to_flag, banner, turkey_now
+from utils import banner, EMOJI, league_to_flag
+from db import save_prediction
+from utils import utcnow
 
-def format_match_message(match):
-    flag = league_to_flag(match.get("league"))
-    start_time = match.get("start_time").strftime("%H:%M") if match.get("start_time") else "-"
-    pred = match.get("prediction")
-    odds = match.get("odds")
-    sport_emoji = EMOJI.get(match.get("sport","futbol"), "⚽")
-    
-    msg = f"{banner(title_short='LIVE')}\n"
-    msg += f"{sport_emoji} {flag} {match.get('league')} | {start_time}\n"
-    msg += f"🏟️ {match.get('home_team')} vs {match.get('away_team')}\n"
-    msg += f"🎯 Tahmin: {pred} | Oran: {odds}\n"
-    msg += f"🕒 {turkey_now().strftime('%d/%m %H:%M')}\n"
-    msg += "═"*38
-    return msg
+def build_live_text(picks, include_minute=True):
+    head = banner("LIVE")
+    lines = [head, ""]
+    for i,p in enumerate(picks,1):
+        flag = league_to_flag(p.get("league"))
+        minute_text = p.get("minute")
+        minute_str = f" | {minute_text}" if minute_text and include_minute else ""
+        emoji = EMOJI.get(p["sport"], "⚽")
+        lines += [
+            f"{flag} {p.get('league','')} {minute_str} {emoji}",
+            f"{i}. **{p['home']} vs {p['away']}**",
+            f"   Tahmin: {p['bet']} → **{p['odds']}** • AI: %{p['prob']}",
+            ""
+        ]
+    lines.append(f"{EMOJI['ding']} Minimum oran: 1.20 • Maks: 3 maç")
+    return "\n".join(lines)
