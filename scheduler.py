@@ -1,31 +1,48 @@
 # scheduler.py
-from prediction import ai_for_match
 import datetime
+import logging
+from prediction import ai_for_match
+
+# Logging ayarları
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
 
 async def hourly_live(matches):
     live_matches = [m for m in matches if m.get("live")][:3]
     predictions = [ai_for_match(m) for m in live_matches if m.get("odds", 0) >= 1.2]
+    log.info(f"Hourly live predictions: {predictions}")
     return predictions
 
 async def daily_coupon(matches):
     upcoming = [m for m in matches if m.get("start_time") < datetime.datetime.utcnow() + datetime.timedelta(hours=24)]
-    return [ai_for_match(m) for m in upcoming]
+    predictions = [ai_for_match(m) for m in upcoming]
+    log.info(f"Daily coupon predictions: {predictions}")
+    return predictions
 
 async def weekly_coupon(matches):
     upcoming = [m for m in matches if m.get("start_time") < datetime.datetime.utcnow() + datetime.timedelta(days=7)]
-    return [ai_for_match(m) for m in upcoming]
+    predictions = [ai_for_match(m) for m in upcoming]
+    log.info(f"Weekly coupon predictions: {predictions}")
+    return predictions
 
 async def kasa_coupon(matches):
     upcoming = [m for m in matches if m.get("start_time") < datetime.datetime.utcnow() + datetime.timedelta(hours=48)]
     sorted_matches = sorted(upcoming, key=lambda x: x.get("confidence", 0), reverse=True)
-    return [ai_for_match(m) for m in sorted_matches[:3]]
+    predictions = [ai_for_match(m) for m in sorted_matches[:3]]
+    log.info(f"Kasa coupon predictions: {predictions}")
+    return predictions
 
 async def check_results(matches):
     finished = [m for m in matches if m.get("finished")]
+    log.info(f"Finished matches: {finished}")
     return finished
 
 async def daily_summary(predictions):
-    summary = {"tahmin_sayısı": len(predictions), "ortalama_güven": sum(p["confidence"] for p in predictions)/len(predictions) if predictions else 0}
+    summary = {
+        "tahmin_sayısı": len(predictions),
+        "ortalama_güven": sum(p["confidence"] for p in predictions)/len(predictions) if predictions else 0
+    }
+    log.info(f"Daily summary: {summary}")
     return summary
     
 log = logging.getLogger(__name__)
