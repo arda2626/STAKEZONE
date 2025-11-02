@@ -753,6 +753,10 @@ async def safe_delete_webhook():
 ## ====================== ANA ======================
 import asyncio
 from datetime import time as dt_time, timezone
+from telegram.ext import Application
+
+# ====================== BOT TOKEN ======================
+TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 
 async def main():
     app = Application.builder().token(TOKEN).build()
