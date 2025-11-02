@@ -750,31 +750,27 @@ async def safe_delete_webhook():
     except Exception as e:
         log.debug(f"safe_delete_webhook error: {e}")
 
-# ---------------- MAIN ----------------
-def main():
-    init_db()
-    # delete webhook once (synchronously) to avoid getUpdates conflict
-    try:
-        asyncio.run(safe_delete_webhook())
-    except Exception:
-        pass
+## ====================== ANA ======================
+import asyncio
+from datetime import time as dt_time, timezone
 
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    jq = app.job_queue
+async def main():
+    app = Application.builder().token(TOKEN).build()
+    job = app.job_queue
 
-    # schedule jobs
-    jq.run_repeating(hourly_live, interval=3600, first=10)            # hourly live
-    jq.run_repeating(check_results, interval=300, first=30)           # results check every 5 min
-    jq.run_daily(gunluk_kupon, time=dt_time(hour=9, minute=0, tzinfo=timezone.utc))  # daily coupon 09:00 UTC
-    jq.run_repeating(haftalik_kupon, interval=86400, first=300)       # weekly check
-    jq.run_repeating(kasa_kuponu, interval=86400, first=600)          # daily kasa
-    jq.run_daily(daily_summary, time=dt_time(hour=20, minute=0, tzinfo=timezone.utc)) # 23:00 TR
-
-    app.add_handler(CommandHandler("test", cmd_test))
-    app.add_handler(CommandHandler("stats", cmd_stats))
+    # === PLANLANMIŞ GÖREVLER ===
+    job.run_repeating(hourly_live, interval=3600, first=10)               # Her saat canlı maç kontrolü
+    job.run_repeating(check_results, interval=300, first=30)              # 5 dk'da bir sonuç kontrol
+    job.run_daily(gunluk_kupon, time=dt_time(hour=9, minute=0, tzinfo=timezone.utc))  # Günlük kupon
+    job.run_repeating(haftalik_kupon, interval=86400, first=300)          # Haftalık kupon
+    job.run_repeating(kasa_kuponu, interval=86400, first=600)             # Kasa kuponu
+    job.run_daily(daily_summary, time=dt_time(hour=23, minute=0, tzinfo=timezone.utc)) # Gün sonu özet
 
     log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA v4.2 (stats-only predictions)")
-    app.run_polling(drop_pending_updates=True)
+    
+    # Telegram botu başlat
+    await app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
