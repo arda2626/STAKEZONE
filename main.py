@@ -27,11 +27,6 @@ if not all([TOKEN, ODDS_KEY]):
     log.error("TELEGRAM_TOKEN veya ODDS_API_KEY eksik!")
     sys.exit(1)
 
-# REPLİKA HATASIZ
-if os.getenv("RAILWAY_REPLICA_ID", "1") != "1":
-    log.info("Pasif Replica → Hatasız Uyuyor")
-    asyncio.run(asyncio.sleep(float("inf")))
-
 log.info("DÜNYA ŞAMPİYONU BOTU ATEŞLENDİ – 100+ LİG + TÜM ÖZELLİKLER")
 
 # ====================== 100+ LİG (TAM LİSTE) ======================
