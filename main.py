@@ -1,81 +1,46 @@
-import os, asyncio, aiohttp, random
+# main.py
+import asyncio
+import logging
+import nest_asyncio
 from telegram.ext import Application
-from utils import utcnow, turkey_now, EMOJI, banner, league_to_flag
 from db import init_db
-from prediction import generate_prediction
-from messages import format_match_message
+from scheduler import hourly_live, daily_coupon, weekly_coupon, kasa_coupon, check_results, daily_summary
+from config import TELEGRAM_TOKEN, LIVE_INTERVAL_SECONDS
+from utils import utcnow
 
-# --- ENV VARS ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1002284350528"))
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger(__name__)
 
-# --- CANLI MAÇ ÇEKME (FUTBOL/BASKETBOL/TENİS) ---
-async def fetch_live_matches(session, sport):
-    """
-    sport: 'football', 'basketball', 'tennis'
-    """
-    events = []
+async def safe_delete_webhook(token):
+    import aiohttp
     try:
-        if sport == "football":
-            url = "https://v3.football.api-sports.io/fixtures?live=all"
-            headers = {"x-apisports-key": os.getenv("API_FOOTBALL_KEY")}
-        elif sport == "basketball":
-            url = "https://v1.basketball.api-sports.io/games?live=all"
-            headers = {"x-apisports-key": os.getenv("API_BASKETBALL_KEY")}
-        elif sport == "tennis":
-            url = "https://v1.tennis.api-sports.io/fixtures?status=LIVE"
-            headers = {"x-apisports-key": os.getenv("API_TENNIS_KEY")}
-        else:
-            return []
+        async with aiohttp.ClientSession() as s:
+            url = f"https://api.telegram.org/bot{token}/deleteWebhook"
+            async with s.post(url, timeout=10) as r:
+                log.info(f"deleteWebhook -> {r.status}")
+    except Exception as e:
+        log.debug(f"safe_delete_webhook error: {e}")
 
-        async with session.get(url, headers=headers, timeout=10) as r:
-            res = await r.json()
-            data = res.get("response", [])
-            for e in data:
-                events.append({
-                    "league": e.get("league", {}).get("name") if sport!="tennis" else e.get("tournament", {}).get("name"),
-                    "home_team": e.get("teams", {}).get("home", {}).get("name") if sport!="tennis" else e.get("players", {}).get("player1", {}).get("name"),
-                    "away_team": e.get("teams", {}).get("away", {}).get("name") if sport!="tennis" else e.get("players", {}).get("player2", {}).get("name"),
-                    "sport": sport,
-                    "start_time": e.get("fixture", {}).get("date") if sport!="tennis" else e.get("time"),
-                    "event_id": e.get("fixture", {}).get("id") if sport!="tennis" else e.get("fixture", {}).get("id"),
-                })
-    except Exception as ex:
-        print(f"fetch_live_matches({sport}) error:", ex)
-    return events
-
-# --- CANLI TAHMİN VE GÖNDERME ---
-async def hourly_live(app):
-    async with aiohttp.ClientSession() as session:
-        all_matches = []
-        for sport in ["football", "basketball", "tennis"]:
-            matches = await fetch_live_matches(session, sport)
-            for m in matches:
-                pred = generate_prediction(sport)
-                m["prediction"] = pred["prediction"]
-                m["odds"] = pred["odds"]
-            all_matches.extend(matches)
-
-        # Telegram’a gönder (max 3 maç)
-        for match in all_matches[:3]:
-            msg = format_match_message(match)
-            try:
-                await app.bot.send_message(CHANNEL_ID, msg, parse_mode="Markdown")
-            except Exception as e:
-                print("Telegram send error:", e)
-
-# --- ANA ---
 async def main():
     init_db()
-    app = Application.builder().token(TOKEN).build()
-    jq = app.job_queue
+    await safe_delete_webhook(TELEGRAM_TOKEN)
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    job = app.job_queue
 
-    # Her saat canlı kontrol
-    jq.run_repeating(hourly_live, interval=3600, first=10, context=app)
-    
+    # schedule jobs
+    job.run_repeating(hourly_live, interval=LIVE_INTERVAL_SECONDS, first=10, name="hourly_live")  # hourly
+    job.run_repeating(check_results, interval=300, first=30, name="check_results")               # every 5 minutes
+    # daily coupon every 12 hours (first at next minute)
+    job.run_repeating(daily_coupon, interval=3600*12, first=60, name="daily_coupon")
+    # weekly and kasa placeholders; weekly run repeating daily check and internal logic handles weekday check if needed
+    job.run_repeating(weekly_coupon, interval=86400, first=300, name="weekly_coupon")
+    job.run_repeating(kasa_coupon, interval=86400, first=600, name="kasa_coupon")
+    # daily summary at 23:00 Turkey could be added with run_daily but using repeating as placeholder
+    job.run_repeating(daily_summary, interval=86400, first=30, name="daily_summary")
+
+    log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA (TSDB-only predictions)")
     await app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    import nest_asyncio
     nest_asyncio.apply()
     asyncio.get_event_loop().run_until_complete(main())
