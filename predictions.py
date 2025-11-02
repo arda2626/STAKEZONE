@@ -1,19 +1,19 @@
+# prediction.py
 import random
 from utils import EMOJI
 
-# ================== ÖRNEK PREDİKSİYON ÜRET ==================
+NBA_PLAYERS = ["LeBron James","Stephen Curry","Jayson Tatum","Giannis Antetokounmpo","Luka Doncic",
+               "Kevin Durant","Devin Booker","Nikola Jokic","Shai Gilgeous-Alexander"]
+
 def generate_prediction(sport="futbol"):
-    """
-    sport: futbol, nba, tenis
-    """
     if sport == "futbol":
-        choices = ["1", "2", "X", "KG", "Üst", "Alt"]
-    elif sport == "nba" or sport == "basketball":
-        choices = ["1", "2", "Üst", "Alt"]
-    elif sport == "tenis":
-        choices = ["1", "2", "Üst", "Alt"]
+        choices = ["1", "X", "2", "KG", "ÜST", "ALT"]
+    elif sport in ["nba","basketball"]:
+        choices = ["1", "2", "ÜST", "ALT", f"{random.choice(NBA_PLAYERS)} 20+ Sayı"]
+    elif sport in ["tenis","atp","wta"]:
+        choices = ["1", "2", "ÜST", "ALT","Tie-break Var"]
     else:
-        choices = ["1", "2", "X"]
+        choices = ["1", "X", "2"]
     
     prediction = random.choice(choices)
     odds = round(random.uniform(1.50, 2.50), 2)
