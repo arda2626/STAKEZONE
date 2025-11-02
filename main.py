@@ -1,64 +1,127 @@
 # main.py
 import asyncio
-from scheduler import hourly_live, daily_coupon, weekly_coupon, kasa_coupon, check_results, daily_summary
-import datetime
+from datetime import datetime, timezone, timedelta
+import logging
+import aiohttp
+import nest_asyncio
+from telegram import Bot
 
-matches = [
-    {"id": 1, "live": True, "odds": 1.5, "confidence": 0.8, "start_time": datetime.datetime.utcnow()},
-    {"id": 2, "live": True, "odds": 1.3, "confidence": 0.6, "start_time": datetime.datetime.utcnow()},
-    {"id": 3, "live": False, "odds": 1.7, "confidence": 0.9, "start_time": datetime.datetime.utcnow() + datetime.timedelta(hours=1)},
-]
-
-async def main():
-    print("Hourly Live Predictions:")
-    print(await hourly_live(matches))
-
-    print("\nDaily Coupon Predictions:")
-    print(await daily_coupon(matches))
-
-    print("\nWeekly Coupon Predictions:")
-    print(await weekly_coupon(matches))
-
-    print("\nKasa Coupon Predictions:")
-    print(await kasa_coupon(matches))
-
-    print("\nFinished Matches Check:")
-    print(await check_results(matches))
-
-asyncio.run(main())
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s", datefmt="%H:%M:%S")
+# ----------------- LOGGING -----------------
+logging.basicConfig(level=logging.INFO, format="%(H:%M:%S) | %(levelname)-8s | %(message)s")
 log = logging.getLogger(__name__)
 
-async def safe_delete_webhook(token):
-    import aiohttp
-    try:
-        async with aiohttp.ClientSession() as s:
-            url = f"https://api.telegram.org/bot{token}/deleteWebhook"
-            async with s.post(url, timeout=10) as r:
-                log.info(f"deleteWebhook -> {r.status}")
-    except Exception as e:
-        log.debug(f"safe_delete_webhook error: {e}")
+# ----------------- TELEGRAM CONFIG -----------------
+TELEGRAM_TOKEN = "BOT_TOKENINIZI_BURAYA"
+CHANNEL_ID = "@KANALINIZ"
 
+# ----------------- API CONFIG -----------------
+THESPORTSDB_KEY = "API_KEYINIZ"
+TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
+
+# ----------------- UTILS -----------------
+def utcnow(): return datetime.now(timezone.utc)
+def ai_for_match(match):
+    from random import uniform
+    prob = uniform(0.5, 0.95)
+    odds = max(match.get("odds",1.5),1.2)
+    return {"id": match.get("id"), "prob": prob, "odds": odds, "confidence": prob, "sport": match.get("sport")}
+
+MAX_LIVE_PICKS = 3
+MIN_ODDS = 1.2
+
+# ----------------- FETCH MATCHES -----------------
+async def fetch_live_matches():
+    async with aiohttp.ClientSession() as session:
+        url = f"{TSDB_BASE}/eventslive.php"
+        try:
+            async with session.get(url, timeout=10) as r:
+                data = await r.json()
+                events = data.get("events", [])
+                matches = []
+                for e in events:
+                    matches.append({
+                        "id": e.get("idEvent"),
+                        "sport": (e.get("strSport") or "futbol").lower(),
+                        "home": e.get("strHomeTeam"),
+                        "away": e.get("strAwayTeam"),
+                        "odds": 1.5,  # placeholder, API üzerinden yok
+                        "confidence": 0.7,  # placeholder
+                        "live": True,
+                        "start_time": utcnow()
+                    })
+                return matches
+        except Exception as e:
+            log.error(f"fetch_live_matches error: {e}")
+            return []
+
+async def fetch_upcoming_matches(hours=48):
+    # Placeholder: for simplicity, we fetch live + next 48h as upcoming
+    live = await fetch_live_matches()
+    upcoming = []
+    # API TheSportsDB ücretsiz sürümde global next24h yok; burayı league-specific yapabilirsiniz
+    return live + upcoming
+
+# ----------------- SCHEDULER FUNCTIONS -----------------
+async def hourly_live(bot: Bot):
+    matches = await fetch_live_matches()
+    live_matches = [m for m in matches if m.get("live")][:MAX_LIVE_PICKS]
+    predictions = [ai_for_match(m) for m in live_matches if m.get("odds",0)>=MIN_ODDS]
+    if predictions:
+        text = "🔥 Hourly Live Predictions 🔥\n"
+        for p in predictions:
+            text += f"{p['sport'].upper()} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}\n"
+        await bot.send_message(CHANNEL_ID, text)
+    log.info(f"Sent {len(predictions)} hourly live predictions")
+    return predictions
+
+async def daily_coupon(bot: Bot):
+    matches = await fetch_upcoming_matches(hours=24)
+    predictions = [ai_for_match(m) for m in matches]
+    if predictions:
+        text = "📅 Daily Coupon Predictions 📅\n"
+        for p in predictions:
+            text += f"{p['sport'].upper()} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}\n"
+        await bot.send_message(CHANNEL_ID, text)
+    log.info(f"Sent {len(predictions)} daily coupon predictions")
+    return predictions
+
+async def weekly_coupon(bot: Bot):
+    matches = await fetch_upcoming_matches(hours=24*7)
+    predictions = [ai_for_match(m) for m in matches]
+    if predictions:
+        text = "🗓️ Weekly Coupon Predictions 🗓️\n"
+        for p in predictions:
+            text += f"{p['sport'].upper()} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}\n"
+        await bot.send_message(CHANNEL_ID, text)
+    log.info(f"Sent {len(predictions)} weekly coupon predictions")
+    return predictions
+
+async def kasa_coupon(bot: Bot):
+    matches = await fetch_upcoming_matches(hours=48)
+    sorted_matches = sorted(matches, key=lambda x: x.get("confidence",0), reverse=True)
+    predictions = [ai_for_match(m) for m in sorted_matches[:3]]
+    if predictions:
+        text = "💰 Kasa (Most Reliable) Predictions 💰\n"
+        for p in predictions:
+            text += f"{p['sport'].upper()} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}\n"
+        await bot.send_message(CHANNEL_ID, text)
+    log.info(f"Sent {len(predictions)} kasa coupon predictions")
+    return predictions
+
+# ----------------- MAIN LOOP -----------------
 async def main():
-    init_db()
-    await safe_delete_webhook(TELEGRAM_TOKEN)
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    job = app.job_queue
-
-    # schedule jobs
-    job.run_repeating(hourly_live, interval=LIVE_INTERVAL_SECONDS, first=10, name="hourly_live")  # hourly
-    job.run_repeating(check_results, interval=300, first=30, name="check_results")               # every 5 minutes
-    # daily coupon every 12 hours (first at next minute)
-    job.run_repeating(daily_coupon, interval=3600*12, first=60, name="daily_coupon")
-    # weekly and kasa placeholders; weekly run repeating daily check and internal logic handles weekday check if needed
-    job.run_repeating(weekly_coupon, interval=86400, first=300, name="weekly_coupon")
-    job.run_repeating(kasa_coupon, interval=86400, first=600, name="kasa_coupon")
-    # daily summary at 23:00 Turkey could be added with run_daily but using repeating as placeholder
-    job.run_repeating(daily_summary, interval=86400, first=30, name="daily_summary")
-
-    log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA (TSDB-only predictions)")
-    await app.run_polling(drop_pending_updates=True)
+    bot = Bot(token=TELEGRAM_TOKEN)
+    while True:
+        try:
+            await hourly_live(bot)
+            await daily_coupon(bot)
+            await weekly_coupon(bot)
+            await kasa_coupon(bot)
+            await asyncio.sleep(3600)  # 1 saat bekle
+        except Exception as e:
+            log.error(f"Error in main loop: {e}")
+            await asyncio.sleep(60)
 
 if __name__ == "__main__":
     nest_asyncio.apply()
-    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.run(main())
