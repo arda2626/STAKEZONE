@@ -1,14 +1,33 @@
 # scheduler.py
-import aiohttp
-from datetime import datetime, timedelta
-from fetcher import fetch_live_events, lookup_event
 from prediction import ai_for_match
-from messages import build_live_text, build_coupon_text
-from db import save_prediction, get_pending_predictions, mark_prediction, day_summary_between
-from utils import utcnow
-from config import MIN_ODDS, MAX_LIVE_PICKS, DAILY_INTERVAL_HOURS, WEEKLY_DAYS, KASA_HOURS, CHANNEL_ID, THESPORTSDB_KEY
-import logging
+import datetime
 
+async def hourly_live(matches):
+    live_matches = [m for m in matches if m.get("live")][:3]
+    predictions = [ai_for_match(m) for m in live_matches if m.get("odds", 0) >= 1.2]
+    return predictions
+
+async def daily_coupon(matches):
+    upcoming = [m for m in matches if m.get("start_time") < datetime.datetime.utcnow() + datetime.timedelta(hours=24)]
+    return [ai_for_match(m) for m in upcoming]
+
+async def weekly_coupon(matches):
+    upcoming = [m for m in matches if m.get("start_time") < datetime.datetime.utcnow() + datetime.timedelta(days=7)]
+    return [ai_for_match(m) for m in upcoming]
+
+async def kasa_coupon(matches):
+    upcoming = [m for m in matches if m.get("start_time") < datetime.datetime.utcnow() + datetime.timedelta(hours=48)]
+    sorted_matches = sorted(upcoming, key=lambda x: x.get("confidence", 0), reverse=True)
+    return [ai_for_match(m) for m in sorted_matches[:3]]
+
+async def check_results(matches):
+    finished = [m for m in matches if m.get("finished")]
+    return finished
+
+async def daily_summary(predictions):
+    summary = {"tahmin_sayısı": len(predictions), "ortalama_güven": sum(p["confidence"] for p in predictions)/len(predictions) if predictions else 0}
+    return summary
+    
 log = logging.getLogger(__name__)
 
 TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
