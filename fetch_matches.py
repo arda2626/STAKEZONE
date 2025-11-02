@@ -3,8 +3,8 @@ import aiohttp
 import os
 from datetime import datetime, timezone, timedelta
 
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "<YOUR_KEY>")
-TSDB_KEY = os.getenv("THESPORTSDB_KEY", "<YOUR_KEY>")
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "<d2e6d7d3d4826877927ded6da40e278e>")
+TSDB_KEY = os.getenv("THESPORTSDB_KEY", "<457761c3fe3072466a8899578fefc5e4>")
 TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{TSDB_KEY}"
 
 async def fetch_football_matches():
