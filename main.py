@@ -9,6 +9,11 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 # ----------------- CONFIG -----------------
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # .env dosyasını oku
+
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
 THESPORTSDB_KEY = os.getenv("THESPORTSDB_KEY")
