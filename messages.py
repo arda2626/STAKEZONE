@@ -1,6 +1,6 @@
-from utils import banner, EMOJI, league_to_flag
-from db import save_prediction
-from utils import utcnow
+# messages.py
+from utils import banner, EMOJI
+from emoji_map import league_to_flag
 
 def build_live_text(picks, include_minute=True):
     head = banner("LIVE")
@@ -16,5 +16,15 @@ def build_live_text(picks, include_minute=True):
             f"   Tahmin: {p['bet']} → **{p['odds']}** • AI: %{p['prob']}",
             ""
         ]
-    lines.append(f"{EMOJI['ding']} Minimum oran: 1.20 • Maks: 3 maç")
+    lines.append(f"{EMOJI['ding']} Minimum oran: {EMOJI.get('min_odds','1.20')} • Maks: 3 maç")
+    return "\n".join(lines)
+
+def build_coupon_text(title, picks):
+    head = banner(title)
+    lines = [head, ""]
+    total = 1.0
+    for i,p in enumerate(picks,1):
+        lines += [f"{i}. {p.get('home')} vs {p.get('away')} • {p['bet']} @ **{p['odds']}** • AI: %{p['prob']}", ""]
+        total *= p['odds']
+    lines += [f"TOPLAM ORAN: **{round(total,2)}** {EMOJI['cash']}"]
     return "\n".join(lines)
