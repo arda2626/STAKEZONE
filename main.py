@@ -24,38 +24,17 @@ WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
-# ================= FLAG FUNCTION =================
-def country_flag(country_name: str) -> str:
-    # Basit ülke bayrağı map
-    flags = {
-        "Italy": "🇮🇹", "Spain": "🇪🇸", "England": "🏴", "Portugal": "🇵🇹",
-        "USA": "🇺🇸", "Germany": "🇩🇪", "France": "🇫🇷", "Turkey": "🇹🇷"
-    }
-    return flags.get(country_name, "🌍")
-
-# ================= BANNER FUNCTIONS =================
+# ================= BASİT BANNER FONKSİYONLARI =================
 def create_daily_banner(picks):
-    lines = []
-    for p in picks:
-        flag = country_flag(p.get("country",""))
-        prediction = p.get("prediction","Tahmin Yok")
-        lines.append(f"{flag} {p['home']} vs {p['away']} | {prediction}, {p.get('odds',1.5)}")
+    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>Günlük Kupon</b>\n" + "\n".join(lines)
 
 def create_vip_banner(picks):
-    lines = []
-    for p in picks:
-        flag = country_flag(p.get("country",""))
-        prediction = p.get("prediction","Tahmin Yok")
-        lines.append(f"{flag} {p['home']} vs {p['away']} | {prediction}, {p.get('odds',1.5)}")
+    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>VIP Kupon</b>\n" + "\n".join(lines)
 
 def create_live_banner(picks):
-    lines = []
-    for p in picks:
-        flag = country_flag(p.get("country",""))
-        prediction = p.get("prediction","Tahmin Yok")
-        lines.append(f"{flag} {p['home']} vs {p['away']} | {prediction}, {p.get('odds',1.5)}")
+    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>Canlı Maçlar</b>\n" + "\n".join(lines)
 
 # ================= JOB FUNCTIONS =================
@@ -73,14 +52,22 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
                 continue
             if was_posted_recently(m["id"], hours=24, path=DB_FILE):
                 continue
+
+            # Default değerleri setle
+            m.setdefault("home", m.get("home", "Unknown"))
+            m.setdefault("away", m.get("away", "Unknown"))
+            m.setdefault("odds", 1.5)
+
             p = ai_predict(m)
+            log.info(f"ai_predict({m['home']} vs {m['away']}) -> {p}")  # Tahmin logu
+
             if "prediction" not in p or not p["prediction"]:
                 p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
             p.setdefault("confidence", p.get("confidence", 0.5))
-            p.setdefault("country", m.get("country",""))
+
             if p["confidence"] >= MIN_CONFIDENCE and p["odds"] >= MIN_ODDS:
                 picks.append((m["id"], p))
 
@@ -98,6 +85,7 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("daily_coupon hata:")
 
+# VIP ve LIVE joblarını da aynı mantıkla log ekleyebilirsin
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -112,14 +100,21 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
                 continue
             if was_posted_recently(m["id"], hours=48, path=DB_FILE):
                 continue
+
+            m.setdefault("home", m.get("home", "Unknown"))
+            m.setdefault("away", m.get("away", "Unknown"))
+            m.setdefault("odds", 1.5)
+
             p = ai_predict(m)
+            log.info(f"ai_predict VIP({m['home']} vs {m['away']}) -> {p}")
+
             if "prediction" not in p or not p["prediction"]:
                 p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
             p.setdefault("confidence", p.get("confidence", 0.5))
-            p.setdefault("country", m.get("country",""))
+
             if p["confidence"] >= MIN_CONFIDENCE_VIP and p["odds"] >= MIN_ODDS:
                 picks.append((m["id"], p))
 
@@ -134,6 +129,7 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("vip_coupon hata:")
 
+# Canlı maç job
 async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -142,13 +138,19 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
         picks = []
 
         for m in live_matches:
+            m.setdefault("home", m.get("home", "Unknown"))
+            m.setdefault("away", m.get("away", "Unknown"))
+            m.setdefault("odds", 1.5)
+
             p = ai_predict(m)
+            log.info(f"ai_predict LIVE({m['home']} vs {m['away']}) -> {p}")
+
             if "prediction" not in p or not p["prediction"]:
                 p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds",1.5))
-            p.setdefault("country", m.get("country",""))
+
             if p["odds"] >= MIN_ODDS:
                 picks.append(p)
 
