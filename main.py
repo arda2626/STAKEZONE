@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Free v5.21 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Free v5.22 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -31,11 +31,10 @@ log = logging.getLogger("stakedrip")
 
 # ================== UTILS =================
 def turkey_time(utc_time_str):
-    """Her tür tarih formatını Türkiye saatine dönüştürür (UTC+3)."""
+    """UTC tarih stringini Türkiye saatine çevirir. Hatalı veya boşsa None döndürür."""
     try:
         if not utc_time_str:
-            # Boşsa varsayılan olarak 1 saat sonrası
-            return datetime.now(timezone(timedelta(hours=3)))
+            return None
         t_str = utc_time_str.strip().replace(" ", "T")
         if "Z" in t_str:
             dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
@@ -43,17 +42,14 @@ def turkey_time(utc_time_str):
             dt = datetime.fromisoformat(t_str).replace(tzinfo=timezone.utc)
         else:
             dt = datetime.fromisoformat(t_str)
-        tr_time = dt.astimezone(timezone(timedelta(hours=3)))
-        return tr_time
+        return dt.astimezone(timezone(timedelta(hours=3)))
     except Exception as e:
-        logging.warning(f"turkey_time error: {e} | value={utc_time_str}")
-        # Hata durumunda bile datetime döndür
-        return datetime.now(timezone(timedelta(hours=3)))
+        log.warning(f"turkey_time error: {e} | value={utc_time_str}")
+        return None
 
 def format_match_line(match):
     start_time = turkey_time(match.get("date"))
-    # start_time artık her zaman datetime, güvenli strftime
-    start_time_str = start_time.strftime("%d-%m %H:%M")
+    start_time_str = start_time.strftime("%d-%m %H:%M") if start_time else "—"
     flag_home = league_to_flag(match.get("home_country", ""))
     flag_away = league_to_flag(match.get("away_country", ""))
     emoji_map = {
@@ -107,7 +103,10 @@ async def process_matches(matches, min_conf=0.6):
     now = datetime.now(timezone.utc)
     for m in matches:
         try:
-            match_time = datetime.fromisoformat(m.get("date").replace("Z", "+00:00"))
+            dt_str = m.get("date")
+            if not dt_str:
+                continue
+            match_time = datetime.fromisoformat(dt_str.replace("Z","+00:00"))
             if match_time.tzinfo is None:
                 match_time = match_time.replace(tzinfo=timezone.utc)
             if match_time < now or was_posted_recently(m["id"], hours=24, path=DB_FILE):
