@@ -67,6 +67,11 @@ def league_to_flag(country_name: str) -> str:
 def utcnow():
     return datetime.now(timezone.utc)
 
+def turkey_now() -> datetime:
+    """Türkiye saatini datetime objesi olarak döndürür."""
+    tr_tz = timezone(timedelta(hours=3))
+    return datetime.now(tr_tz)
+
 # ================== ORAN VE FORM ==================
 def ensure_min_odds(odds: float, minimum: float = 1.40) -> float:
     return max(odds, minimum)
@@ -97,11 +102,13 @@ def format_prediction_line(match):
     confidence = confidence_score(match.get("confidence", 0.7))
     home = match.get("home", "Ev Sahibi")
     away = match.get("away", "Deplasman")
+
     return f"{flag} {minute} | {home} vs {away} | {emoji} {prediction} | {confidence}"
 
 def banner(title: str, matches: list) -> str:
     if not matches:
         return f"{EMOJI['ai']} {title}\nVeri bulunamadı ⏳"
+
     lines = [f"{EMOJI['ai']} {title}", "━━━━━━━━━━━━━━━"]
     for m in matches:
         lines.append(format_prediction_line(m))
@@ -143,20 +150,18 @@ def get_pending_predictions():
     cur.execute("SELECT id, home, away, prediction, confidence FROM predictions WHERE status='pending'")
     rows = cur.fetchall()
     conn.close()
-    return [{"id": r[0], "home": r[1], "away": r[2], "prediction": r[3], "confidence": r[4]} for r in rows]
+    result = [{"id": r[0], "home": r[1], "away": r[2], "prediction": r[3], "confidence": r[4]} for r in rows]
+    return result
 
 def day_summary_between(start_date: datetime, end_date: datetime):
     """Belirli bir tarih aralığındaki başarı oranını döndürür."""
     conn = sqlite3.connect("stakedrip.db")
     cur = conn.cursor()
-    cur.execute(
-        "SELECT status, COUNT(*) FROM predictions WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY status",
-        (start_date.date(), end_date.date())
-    )
+    cur.execute("SELECT status, COUNT(*) FROM predictions WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY status",
+                (start_date.date(), end_date.date()))
     stats = {row[0]: row[1] for row in cur.fetchall()}
     conn.close()
-    won = stats.get("won", 0)
-    lost = stats.get("lost", 0)
+    won, lost = stats.get("won", 0), stats.get("lost", 0)
     total = won + lost
     success_rate = (won / total) * 100 if total else 0
     return f"📅 {start_date.date()} - {end_date.date()} Başarı Oranı: %{success_rate:.1f}"
