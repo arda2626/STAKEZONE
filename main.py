@@ -13,7 +13,7 @@ from utils import turkey_now
 # ------------- CONFIG (telefon kullanımına göre kolay düzenleme) -------------
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"   # burayı kendi token ile değiştir
 CHANNEL_ID = "@stakedrip"                                          # kanal ya da chat id
-API_FOOTBALL_KEY = None    # eğer API-Football kullanacaksan buraya key yazabilirsin (opsiyonel)
+API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"    # eğer API-Football kullanacaksan buraya key yazabilirsin (opsiyonel)
 DB_FILE = DB_PATH
 MAX_LIVE_PICKS = 3
 MIN_CONFIDENCE = 0.60
