@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.8 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.10 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
@@ -9,26 +9,36 @@ import uvicorn
 from db import init_db, DB_PATH, mark_posted, was_posted_recently
 from fetch_matches_free import fetch_all_matches
 from prediction import ai_predict
-from messages import create_daily_banner, create_vip_banner, create_live_banner
 
 # ================= CONFIG =================
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 DB_FILE = DB_PATH
 
-# Minimum değerler
 MIN_CONFIDENCE = 0.60
 MIN_CONFIDENCE_VIP = 0.80
 MIN_ODDS = 1.20
-
 WEBHOOK_PATH = "/stakedrip"
 WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
-# ================= JOB FUNCTIONS =================
+# ================= BASİT BANNER FONKSİYONLARI =================
+# Eğer messages.py yoksa hızlı bir çözüm:
+def create_daily_banner(picks):
+    lines = [f"{p['home']} vs {p['away']} | {p.get('bet', '-')}, {p.get('odds',1.5)}" for p in picks]
+    return "<b>Günlük Kupon</b>\n" + "\n".join(lines)
 
+def create_vip_banner(picks):
+    lines = [f"{p['home']} vs {p['away']} | {p.get('bet', '-')}, {p.get('odds',1.5)}" for p in picks]
+    return "<b>VIP Kupon</b>\n" + "\n".join(lines)
+
+def create_live_banner(picks):
+    lines = [f"{p['home']} vs {p['away']} | {p.get('bet', '-')}, {p.get('odds',1.5)}" for p in picks]
+    return "<b>Canlı Maçlar</b>\n" + "\n".join(lines)
+
+# ================= JOB FUNCTIONS =================
 async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -89,7 +99,7 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
 
         if picks:
             chosen = sorted([p for mid,p in picks], key=lambda x: x["confidence"], reverse=True)[:1]
-            text = create_vip_banner(chosen)
+            text = create_vip_banner([p for mid,p in picks])
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             for mid, _ in picks:
                 mark_posted(mid, path=DB_FILE)
@@ -125,28 +135,16 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
 
 # ================= ADMIN COMMAND =================
 async def test_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await daily_coupon_job(context)
-        await update.message.reply_text("Test: Günlük kupon çalıştırıldı.")
-    except Exception:
-        log.exception("test_daily hata:")
-        await update.message.reply_text("Test sırasında hata oluştu.")
+    await daily_coupon_job(context)
+    await update.message.reply_text("Test: Günlük kupon çalıştırıldı.")
 
 async def test_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await vip_coupon_job(context)
-        await update.message.reply_text("Test: VIP kupon çalıştırıldı.")
-    except Exception:
-        log.exception("test_vip hata:")
-        await update.message.reply_text("Test sırasında hata oluştu.")
+    await vip_coupon_job(context)
+    await update.message.reply_text("Test: VIP kupon çalıştırıldı.")
 
 async def test_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        await hourly_live_job(context)
-        await update.message.reply_text("Test: Canlı maç kuponu çalıştırıldı.")
-    except Exception:
-        log.exception("test_live hata:")
-        await update.message.reply_text("Test sırasında hata oluştu.")
+    await hourly_live_job(context)
+    await update.message.reply_text("Test: Canlı maç kuponu çalıştırıldı.")
 
 # ================= FASTAPI + TELEGRAM =================
 fastapi_app = FastAPI()
@@ -160,12 +158,12 @@ telegram_app.add_handler(CommandHandler("test_live", test_live))
 async def startup():
     init_db(DB_FILE)
     log.info("✅ Database initialized")
-    
+
     jq: JobQueue = telegram_app.job_queue
     jq.run_repeating(daily_coupon_job, interval=3600*12, first=10, name="daily_coupon")
     jq.run_repeating(vip_coupon_job, interval=3600*24, first=20, name="vip_coupon")
     jq.run_repeating(hourly_live_job, interval=3600, first=30, name="hourly_live")
-    
+
     await telegram_app.initialize()
     await telegram_app.start()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
