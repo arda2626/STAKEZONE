@@ -13,8 +13,8 @@ logging.basicConfig(
 # ----------------- CONFIG -----------------
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
-THESPORTSDB_KEY = "457761c3fe3072466a8899578fefc5e4"
-TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
+ALLSPORTSAPI_KEY = "27b16a330f4ac79a1f8eb383fec049b9cc0818d5e33645d771e2823db5d80369"
+url = f"https://api.allsportsapi.com/football/live?key={ALLSPORTSAPI_KEY}"
 
 MAX_LIVE_PICKS = 3
 MIN_ODDS = 1.2
