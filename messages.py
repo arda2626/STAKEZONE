@@ -4,7 +4,7 @@ from html import escape
 
 def create_live_banner(predictions):
     # HTML compatible banner (we'll use parse_mode="HTML")
-    head = util_banner("LIVE")
+    head = util_banner("LIVE", predictions)
     lines = [f"<pre>{escape(head)}</pre>", ""]
     for i,p in enumerate(predictions,1):
         flag = league_to_flag(p.get("league"))
