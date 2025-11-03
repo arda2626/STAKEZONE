@@ -1,62 +1,92 @@
-# fetch_matches.py
+# ================== fetch_matches.py — STAKEDRIP AI ULTRA v5.0 ==================
 import aiohttp
+import logging
 from datetime import datetime, timezone
-from utils import utcnow, ensure_min_odds
-import os
 
-API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"  # Buraya API-Football keyini yaz
-BASE_FOOTBALL_URL = "https://v3.football.api-sports.io"
+log = logging.getLogger("stakedrip")
 
-HEADERS = {
-    "x-apisports-key": API_FOOTBALL_KEY
+API_BASE = "https://v3.football.api-sports.io"
+
+HEADERS_TEMPLATE = lambda key: {
+    "x-rapidapi-host": "v3.football.api-sports.io",
+    "x-rapidapi-key": key
 }
 
-async def fetch_football_matches():
-    url = f"{BASE_FOOTBALL_URL}/fixtures?live=all"
-    matches = []
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, headers=HEADERS, timeout=10) as resp:
+async def fetch_api(url, key):
+    try:
+        async with aiohttp.ClientSession(headers=HEADERS_TEMPLATE(key)) as session:
+            async with session.get(url) as resp:
                 if resp.status != 200:
+                    log.warning(f"⚠️ API response {resp.status}: {await resp.text()}")
                     return []
                 data = await resp.json()
-                fixtures = data.get("response", [])
-                for f in fixtures:
-                    fixture = f["fixture"]
-                    teams = f["teams"]
-                    league = f["league"]["name"]
-                    home = teams["home"]["name"]
-                    away = teams["away"]["name"]
-                    odds = ensure_min_odds(f.get("odds", {}).get("home_win", 1.2))
-                    matches.append({
-                        "id": fixture["id"],
-                        "league": league,
-                        "home": home,
-                        "away": away,
-                        "sport": "futbol",
-                        "live": fixture["status"]["short"] in ["1H","2H","LIVE"],
-                        "odds": odds,
-                        "confidence": 0.7,
-                        "start_time": datetime.fromisoformat(fixture["date"].replace("Z","+00:00"))
-                    })
-        except Exception as e:
-            print(f"fetch_football_matches error: {e}")
+                return data.get("response", [])
+    except Exception as e:
+        log.error(f"fetch_api error: {e}")
+        return []
+
+async def fetch_live_football(key):
+    url = f"{API_BASE}/fixtures?live=all"
+    data = await fetch_api(url, key)
+    matches = []
+    for m in data:
+        try:
+            matches.append({
+                "sport": "football",
+                "league": m["league"]["name"],
+                "home": m["teams"]["home"]["name"],
+                "away": m["teams"]["away"]["name"],
+                "score": f"{m['goals']['home']}-{m['goals']['away']}",
+                "minute": m.get("fixture", {}).get("status", {}).get("elapsed", 0),
+                "live": True
+            })
+        except Exception:
+            continue
     return matches
 
-# Basketbol ve tenis API-Football tarafından resmi olarak desteklenmiyor
-# Ancak istersen dummy canlı endpointleri veya başka API kullanabilirsin
-# Aşağıda placeholder olarak bırakıyorum
+async def fetch_live_basketball(key):
+    # Basketball endpoint
+    url = "https://v1.basketball.api-sports.io/games?live=all"
+    data = await fetch_api(url, key)
+    matches = []
+    for g in data:
+        try:
+            matches.append({
+                "sport": "basketball",
+                "league": g["league"]["name"],
+                "home": g["teams"]["home"]["name"],
+                "away": g["teams"]["away"]["name"],
+                "score": f"{g['scores']['home']['total']}-{g['scores']['away']['total']}",
+                "quarter": g["status"]["short"],
+                "live": True
+            })
+        except Exception:
+            continue
+    return matches
 
-async def fetch_nba_matches():
-    # placeholder: kendi API veya TSDB kullanabilirsin
-    return []
+async def fetch_live_tennis(key):
+    # Tennis endpoint
+    url = "https://v1.tennis.api-sports.io/matches?live=all"
+    data = await fetch_api(url, key)
+    matches = []
+    for t in data:
+        try:
+            matches.append({
+                "sport": "tennis",
+                "league": t["tournament"]["name"],
+                "home": t["teams"]["home"]["name"],
+                "away": t["teams"]["away"]["name"],
+                "score": f"{t['scores']['home']['sets']}-{t['scores']['away']['sets']}",
+                "live": True
+            })
+        except Exception:
+            continue
+    return matches
 
-async def fetch_tennis_matches():
-    # placeholder: kendi API veya TSDB kullanabilirsin
-    return []
-
-async def fetch_all_matches():
-    football = await fetch_football_matches()
-    nba = await fetch_nba_matches()
-    tennis = await fetch_tennis_matches()
-    return football + nba + tennis
+async def fetch_all_matches(key):
+    football = await fetch_live_football(key)
+    basketball = await fetch_live_basketball(key)
+    tennis = await fetch_live_tennis(key)
+    all_matches = football + basketball + tennis
+    log.info(f"Fetched {len(all_matches)} total live matches.")
+    return all_matches
