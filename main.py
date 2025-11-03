@@ -1,81 +1,85 @@
-# main.py
+# ================== main.py — STAKEDRIP AI ULTRA v5.0 ==================
 import asyncio
-import aiohttp
 import logging
 from datetime import datetime, timezone
-from telegram import Bot
-from utils import utcnow, banner
-from prediction import ai_for_match
-from fetch_matches import fetch_football_matches, fetch_nba_matches, fetch_tennis_matches
 
-# ----------------- LOGGING -----------------
+from telegram import Bot
+from fetch_matches import fetch_all_matches
+from prediction import ai_predict
+from messages import create_live_banner, create_daily_banner, create_vip_banner
+from scheduler import schedule_jobs
+from results import check_results
+
+# ================== CONFIG ==================
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
+CHANNEL_ID = "@stakedrip"
+API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"
+
+MAX_LIVE_PICKS = 3
+MIN_CONFIDENCE = 0.65
+
+# ================== LOGGING ==================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(message)s",
     datefmt="%H:%M:%S"
 )
-log = logging.getLogger(__name__)
+log = logging.getLogger("stakedrip")
 
-# ----------------- CONFIG -----------------
-TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
-CHANNEL_ID = "@stakedrip"
-MAX_LIVE_PICKS = 3
-MIN_ODDS = 1.2
+# ================== UTILS ==================
+def utcnow():
+    return datetime.now(timezone.utc)
 
-# ----------------- FETCH ALL -----------------
-async def fetch_all():
-    football = await fetch_football_matches()
-    nba = await fetch_nba_matches()
-    tennis = await fetch_tennis_matches()
-    return football + nba + tennis
-
-# ----------------- SEND PREDICTIONS -----------------
-async def send_predictions(bot: Bot, title, matches, max_picks=3):
-    live_matches = [m for m in matches if m.get("live")][:max_picks]
-    predictions = [ai_for_match(m) for m in live_matches if m.get("odds",0) >= MIN_ODDS]
-
-    if not predictions:
-        log.info(f"No {title} matches found")
-        return
-
-    text = banner(title) + "\n"
-    for p in predictions:
-        text += f"{p['sport'].upper()} | {p.get('home','')} vs {p.get('away','')} | Tahmin: {p.get('bet_text','1X2')} | Oran: {p.get('odds')} | Conf: {p.get('confidence'):.2f}\n"
-
+# ================== CORE LOOP ==================
+async def send_hourly_predictions(bot: Bot):
     try:
-        await bot.send_message(CHANNEL_ID, text)
-        log.info(f"Sent {len(predictions)} {title} predictions")
-    except Exception as e:
-        log.error(f"Error sending Telegram message: {e}")
+        matches = await fetch_all_matches(API_FOOTBALL_KEY)
+        live_matches = [m for m in matches if m.get("live")]
+        top_live = live_matches[:MAX_LIVE_PICKS]
 
-# ----------------- MAIN LOOP -----------------
+        predictions = [ai_predict(m) for m in top_live if m["confidence"] >= MIN_CONFIDENCE]
+        if not predictions:
+            log.info("No live predictions found this hour.")
+            return
+
+        banner = create_live_banner(predictions)
+        await bot.send_message(chat_id=CHANNEL_ID, text=banner, parse_mode="HTML")
+        log.info(f"✅ Sent {len(predictions)} live AI predictions.")
+    except Exception as e:
+        log.error(f"send_hourly_predictions error: {e}")
+
+# ================== DAILY & VIP JOBS ==================
+async def send_daily_coupon(bot: Bot):
+    matches = await fetch_all_matches(API_FOOTBALL_KEY)
+    top_picks = [ai_predict(m) for m in matches[:5]]
+    text = create_daily_banner(top_picks)
+    await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+    log.info("📅 Daily coupon sent.")
+
+async def send_vip_coupon(bot: Bot):
+    matches = await fetch_all_matches(API_FOOTBALL_KEY)
+    vip_picks = [ai_predict(m) for m in matches if m["confidence"] > 0.85][:3]
+    text = create_vip_banner(vip_picks)
+    await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+    log.info("💰 VIP (kasa) coupon sent.")
+
+# ================== MAIN LOOP ==================
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
-    while True:
-        try:
-            matches = await fetch_all()
-            # Canlı maçlar
-            await send_predictions(bot, "CANLI", matches, MAX_LIVE_PICKS)
-            # Günlük kupon
-            await send_predictions(bot, "GÜNLÜK", matches, max_picks=5)
-            # Haftalık kupon
-            await send_predictions(bot, "HAFTALIK", matches, max_picks=7)
-            # Kasa kupon (en yüksek confidence)
-            top_conf = sorted([ai_for_match(m) for m in matches], key=lambda x: x["confidence"], reverse=True)
-            if top_conf:
-                text = banner("KASA") + "\n"
-                for p in top_conf[:3]:
-                    text += f"{p['sport'].upper()} | {p.get('home','')} vs {p.get('away','')} | Tahmin: {p.get('bet_text','1X2')} | Oran: {p.get('odds')} | Conf: {p.get('confidence'):.2f}\n"
-                try:
-                    await bot.send_message(CHANNEL_ID, text)
-                    log.info("Sent KASA predictions")
-                except Exception as e:
-                    log.error(f"Error sending KASA: {e}")
+    log.info("🚀 STAKEDRIP AI ULTRA v5.0 started.")
 
-            await asyncio.sleep(3600)  # 1 saat bekle
-        except Exception as e:
-            log.error(f"Error in main loop: {e}")
-            await asyncio.sleep(60)
+    # Saatlik canlı tahminler
+    await send_hourly_predictions(bot)
+
+    # Günlük ve VIP planlama
+    await schedule_jobs(bot, send_hourly_predictions, send_daily_coupon, send_vip_coupon, check_results)
+
+    # Sonsuz döngü
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        log.warning("Bot stopped manually.")
