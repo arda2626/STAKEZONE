@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Free v5.22 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Free v5.23 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -29,12 +29,12 @@ THE_ODDS_API_URL = "https://api.the-odds-api.com/v4/sports/{sport}/odds"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
-# ================== UTILS =================
+# ================== YENİ TURKEY_TIME =================
 def turkey_time(utc_time_str):
-    """UTC tarih stringini Türkiye saatine çevirir. Hatalı veya boşsa None döndürür."""
+    """UTC'yi Türkiye saatine çevirir + Bugün/Yarın/Pazartesi döndürür."""
     try:
         if not utc_time_str:
-            return None
+            return "—", None
         t_str = utc_time_str.strip().replace(" ", "T")
         if "Z" in t_str:
             dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
@@ -42,14 +42,27 @@ def turkey_time(utc_time_str):
             dt = datetime.fromisoformat(t_str).replace(tzinfo=timezone.utc)
         else:
             dt = datetime.fromisoformat(t_str)
-        return dt.astimezone(timezone(timedelta(hours=3)))
+        tr_time = dt.astimezone(timezone(timedelta(hours=3)))
+        today = datetime.now(timezone(timedelta(hours=3))).date()
+        tomorrow = today + timedelta(days=1)
+
+        if tr_time.date() == today:
+            day_str = "Bugün"
+        elif tr_time.date() == tomorrow:
+            day_str = "Yarın"
+        else:
+            günler = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
+            day_str = günler[tr_time.weekday()]
+
+        time_str = tr_time.strftime("%H:%M")
+        return f"{day_str} {time_str}", tr_time
     except Exception as e:
         log.warning(f"turkey_time error: {e} | value={utc_time_str}")
-        return None
+        return "—", None
 
+# ================== YENİ FORMAT & BANNER =================
 def format_match_line(match):
-    start_time = turkey_time(match.get("date"))
-    start_time_str = start_time.strftime("%d-%m %H:%M") if start_time else "—"
+    day_time_str, _ = turkey_time(match.get("date"))
     flag_home = league_to_flag(match.get("home_country", ""))
     flag_away = league_to_flag(match.get("away_country", ""))
     emoji_map = {
@@ -58,16 +71,21 @@ def format_match_line(match):
     }
     emoji = emoji_map.get(match.get("bet"), "💡")
     return (
-        f"{flag_home} {match['home']} vs {flag_away} {match['away']}\n"
-        f"🕒 Başlangıç: {start_time_str}\n"
-        f"{emoji} Tahmin: {match.get('bet','Tahmin Yok')}\n"
-        f"💰 Oran: {match.get('odds',1.5):.2f}"
+        f"{flag_home} {match['home']} <b>vs</b> {flag_away} {match['away']}\n"
+        f"🕒 <b>{day_time_str}</b>\n"
+        f"{emoji} <b>{match.get('bet','Tahmin Yok')}</b>\n"
+        f"💰 Oran: <b>{match.get('odds',1.5):.2f}</b>"
     )
 
 def create_banner(title, matches):
     if not matches:
         return f"🤖 {title}\nVeri bulunamadı ⏳"
-    lines = [f"🤖 {title}", "━━━━━━━━━━━━━━━"]
+    bugün = datetime.now(timezone(timedelta(hours=3))).strftime("%d %B %Y")
+    lines = [
+        f"🤖 <b>{title}</b>",
+        f"📅 {bugün}",
+        "━━━━━━━━━━━━━━━"
+    ]
     for m in matches:
         lines.append(format_match_line(m))
     return "\n\n".join(lines)
@@ -207,7 +225,7 @@ async def startup():
         log.info(f"Webhook set to {WEBHOOK_URL}")
     else:
         log.info("Webhook zaten kayıtlı, atlandı.")
-    log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA Free APIs")
+    log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA Free v5.23")
 
 @fastapi_app.on_event("shutdown")
 async def shutdown():
