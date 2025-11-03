@@ -1,4 +1,4 @@
-# fetch_matches_free.py — Güvenli fetch
+# fetch_matches_free.py — Güvenli fetch + Bayrak desteği
 import aiohttp
 import logging
 from datetime import datetime, timezone
@@ -31,7 +31,8 @@ async def fetch_football(session):
                         "home": m.get("homeTeam", {}).get("name", "Unknown"),
                         "away": m.get("awayTeam", {}).get("name", "Unknown"),
                         "league": m.get("competition", {}).get("name", "Bilinmeyen Lig"),
-                        "country": m.get("competition", {}).get("area", {}).get("name", ""),
+                        "country_home": m.get("homeTeam", {}).get("area", {}).get("countryCode", ""),
+                        "country_away": m.get("awayTeam", {}).get("area", {}).get("countryCode", ""),
                         "odds": 1.5,
                         "confidence": 0.5,
                         "date": dt.isoformat(),
@@ -59,7 +60,8 @@ async def fetch_basketball(session):
                         "home": m.get("home_team", {}).get("full_name", "Unknown"),
                         "away": m.get("visitor_team", {}).get("full_name", "Unknown"),
                         "league": "NBA",
-                        "country": "USA",
+                        "country_home": "US",
+                        "country_away": "US",
                         "odds": 1.6,
                         "confidence": 0.5,
                         "date": dt.isoformat(),
@@ -91,7 +93,8 @@ async def fetch_tennis(session):
                         "home": event[0],
                         "away": event[1],
                         "league": m.get("competition", {}).get("name", "Tenis Turnuvası"),
-                        "country": "",
+                        "country_home": "",
+                        "country_away": "",
                         "odds": 1.7,
                         "confidence": 0.5,
                         "date": datetime.now(timezone.utc).isoformat(),
