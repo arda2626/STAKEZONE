@@ -1,6 +1,12 @@
-import asyncio, aiohttp, logging, os
+# main.py
+import asyncio
+import aiohttp
+import logging
 from datetime import datetime, timezone
 from telegram import Bot
+from utils import utcnow, banner
+from prediction import ai_for_match
+from fetch_matches import fetch_football_matches, fetch_nba_matches, fetch_tennis_matches
 
 # ----------------- LOGGING -----------------
 logging.basicConfig(
@@ -11,83 +17,62 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ----------------- CONFIG -----------------
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@stakedrip")
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "3838237ec41218c2572ce541708edcfd")
-
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
+CHANNEL_ID = "@stakedrip"
 MAX_LIVE_PICKS = 3
 MIN_ODDS = 1.2
 
-def utcnow():
-    return datetime.now(timezone.utc)
-
-# ----------------- AI -----------------
-def ai_for_match(match):
-    from random import uniform
-    prob = uniform(0.5, 0.95)
-    odds = max(match.get("odds",1.5),1.2)
-    return {
-        "id": match.get("id"),
-        "sport": match.get("sport"),
-        "home": match.get("home"),
-        "away": match.get("away"),
-        "odds": odds,
-        "confidence": prob
-    }
-
-# ----------------- FETCH LIVE MATCHES -----------------
-async def fetch_live_matches():
-    url = "https://v3.football.api-sports.io/fixtures?live=all"
-    headers = {"x-apisports-key": API_FOOTBALL_KEY}
-    matches = []
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=10) as r:
-                if r.status != 200:
-                    log.warning(f"fetch_live_matches: status {r.status}")
-                    return []
-                data = await r.json()
-                for f in data.get("response", []):
-                    fixture = f.get("fixture", {})
-                    teams = f.get("teams", {})
-                    matches.append({
-                        "id": fixture.get("id"),
-                        "sport": "futbol",
-                        "home": teams.get("home", {}).get("name"),
-                        "away": teams.get("away", {}).get("name"),
-                        "odds": 1.5,
-                        "confidence": 0.7,
-                        "live": fixture.get("status", {}).get("short") in ["1H","2H"],
-                        "start_time": utcnow()
-                    })
-    except Exception as e:
-        log.error(f"fetch_live_matches error: {e}")
-    return matches
+# ----------------- FETCH ALL -----------------
+async def fetch_all():
+    football = await fetch_football_matches()
+    nba = await fetch_nba_matches()
+    tennis = await fetch_tennis_matches()
+    return football + nba + tennis
 
 # ----------------- SEND PREDICTIONS -----------------
-async def hourly_live(bot: Bot):
-    matches = await fetch_live_matches()
-    live_matches = [m for m in matches if m.get("live")][:MAX_LIVE_PICKS]
+async def send_predictions(bot: Bot, title, matches, max_picks=3):
+    live_matches = [m for m in matches if m.get("live")][:max_picks]
     predictions = [ai_for_match(m) for m in live_matches if m.get("odds",0) >= MIN_ODDS]
-    if predictions:
-        text = "🔥 Hourly Live Predictions 🔥\n"
-        for p in predictions:
-            text += f"{p['sport'].upper()} | {p.get('home','')} vs {p.get('away','')} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}\n"
-        try:
-            await bot.send_message(CHANNEL_ID, text)
-            log.info(f"Sent {len(predictions)} hourly live predictions")
-        except Exception as e:
-            log.error(f"Error sending Telegram message: {e}")
-    else:
-        log.info("No live matches found this hour")
+
+    if not predictions:
+        log.info(f"No {title} matches found")
+        return
+
+    text = banner(title) + "\n"
+    for p in predictions:
+        text += f"{p['sport'].upper()} | {p.get('home','')} vs {p.get('away','')} | Tahmin: {p.get('bet_text','1X2')} | Oran: {p.get('odds')} | Conf: {p.get('confidence'):.2f}\n"
+
+    try:
+        await bot.send_message(CHANNEL_ID, text)
+        log.info(f"Sent {len(predictions)} {title} predictions")
+    except Exception as e:
+        log.error(f"Error sending Telegram message: {e}")
 
 # ----------------- MAIN LOOP -----------------
 async def main():
     bot = Bot(token=TELEGRAM_TOKEN)
     while True:
         try:
-            await hourly_live(bot)
-            await asyncio.sleep(3600)
+            matches = await fetch_all()
+            # Canlı maçlar
+            await send_predictions(bot, "CANLI", matches, MAX_LIVE_PICKS)
+            # Günlük kupon
+            await send_predictions(bot, "GÜNLÜK", matches, max_picks=5)
+            # Haftalık kupon
+            await send_predictions(bot, "HAFTALIK", matches, max_picks=7)
+            # Kasa kupon (en yüksek confidence)
+            top_conf = sorted([ai_for_match(m) for m in matches], key=lambda x: x["confidence"], reverse=True)
+            if top_conf:
+                text = banner("KASA") + "\n"
+                for p in top_conf[:3]:
+                    text += f"{p['sport'].upper()} | {p.get('home','')} vs {p.get('away','')} | Tahmin: {p.get('bet_text','1X2')} | Oran: {p.get('odds')} | Conf: {p.get('confidence'):.2f}\n"
+                try:
+                    await bot.send_message(CHANNEL_ID, text)
+                    log.info("Sent KASA predictions")
+                except Exception as e:
+                    log.error(f"Error sending KASA: {e}")
+
+            await asyncio.sleep(3600)  # 1 saat bekle
         except Exception as e:
             log.error(f"Error in main loop: {e}")
             await asyncio.sleep(60)
