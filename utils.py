@@ -16,6 +16,7 @@ EMOJI = {
     "trend": "📈",
     "earth": "🌍",
     "light": "💡",
+    "ding": "🔔",
 }
 
 EMOJI_MAP = {
@@ -79,13 +80,13 @@ def calc_form_score(form_string: str) -> float:
 # ================== GÜVEN SEVİYESİ ==================
 def confidence_score(probability: float) -> str:
     if probability >= 0.85:
-        return "🔥 Çok Yüksek Güven"
+        return "Çok Yüksek Güven 🔥"
     elif probability >= 0.70:
-        return "💪 Yüksek Güven"
+        return "Yüksek Güven 💪"
     elif probability >= 0.55:
-        return "⚙️ Orta Güven"
+        return "Orta Seviye ⚙️"
     else:
-        return "⚠️ Düşük Güven"
+        return "Düşük Güven ⚠️"
 
 # ================== BANNER GÖRÜNÜMÜ ==================
 def format_prediction_line(match):
@@ -106,8 +107,9 @@ def banner(title: str, matches: list) -> str:
         lines.append(format_prediction_line(m))
     return "\n".join(lines)
 
-# ================== VERİ TABANI ==================
+# ================== VERİ TABANI İŞLEMLERİ ==================
 def init_db(path=None):
+    """SQLite veritabanını başlatır."""
     conn = sqlite3.connect("stakedrip.db")
     cur = conn.cursor()
     cur.execute("""
@@ -126,6 +128,7 @@ def init_db(path=None):
     print("✅ Database initialized: stakedrip.db")
 
 def mark_prediction(prediction_id: str, status: str):
+    """Tahmini kazandı/kaybetti olarak işaretler."""
     conn = sqlite3.connect("stakedrip.db")
     cur = conn.cursor()
     cur.execute("UPDATE predictions SET status=? WHERE id=?", (status, prediction_id))
@@ -134,6 +137,7 @@ def mark_prediction(prediction_id: str, status: str):
     print(f"[DB] Tahmin #{prediction_id} sonucu güncellendi: {status}")
 
 def get_pending_predictions():
+    """Henüz sonuçlanmamış tahminleri döndürür."""
     conn = sqlite3.connect("stakedrip.db")
     cur = conn.cursor()
     cur.execute("SELECT id, home, away, prediction, confidence FROM predictions WHERE status='pending'")
@@ -141,37 +145,23 @@ def get_pending_predictions():
     conn.close()
     return [{"id": r[0], "home": r[1], "away": r[2], "prediction": r[3], "confidence": r[4]} for r in rows]
 
-# ================== GÜNLÜK RAPOR & TEKRAR KONTROL ==================
-def is_duplicate_match(home, away, hours=24):
-    """Aynı maç 24 saat içinde zaten eklendiyse True döndürür."""
+def day_summary_between(start_date: datetime, end_date: datetime):
+    """Belirli bir tarih aralığındaki başarı oranını döndürür."""
     conn = sqlite3.connect("stakedrip.db")
     cur = conn.cursor()
-    cur.execute("""
-        SELECT COUNT(*) FROM predictions 
-        WHERE home=? AND away=? 
-        AND created_at >= datetime('now', ?)
-    """, (home, away, f'-{hours} hours'))
-    exists = cur.fetchone()[0] > 0
-    conn.close()
-    return exists
-
-def day_summary():
-    """Günün genel başarı oranını hesaplar."""
-    conn = sqlite3.connect("stakedrip.db")
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT status, COUNT(*) FROM predictions
-        WHERE DATE(created_at) = DATE('now')
-        GROUP BY status
-    """)
+    cur.execute(
+        "SELECT status, COUNT(*) FROM predictions WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY status",
+        (start_date.date(), end_date.date())
+    )
     stats = {row[0]: row[1] for row in cur.fetchall()}
     conn.close()
-    total = sum(stats.values())
     won = stats.get("won", 0)
-    rate = (won / total) * 100 if total else 0
-    return f"📅 Gün Sonu Özeti: {won}/{total} kazandı • Başarı Oranı: %{rate:.1f}"
+    lost = stats.get("lost", 0)
+    total = won + lost
+    success_rate = (won / total) * 100 if total else 0
+    return f"📅 {start_date.date()} - {end_date.date()} Başarı Oranı: %{success_rate:.1f}"
 
-# ================== RASTGELE MESAJ ==================
+# ================== RASTGELE AI MESAJI ==================
 def random_ai_message() -> str:
     phrases = [
         "Veriler analiz ediliyor...",
