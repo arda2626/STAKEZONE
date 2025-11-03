@@ -1,27 +1,130 @@
-# ================== messages.py — STAKEDRIP AI ULTRA v5.1 ==================
-from utils import format_prediction_line, league_to_flag, EMOJI
+# ================== utils.py — STAKEDRIP AI ULTRA v5.1 ==================
+import random
+import math
+from datetime import datetime
 
-# 🔴 Canlı Maç Banner
-def create_live_banner(predictions):
-    banner = f"{EMOJI['fire']} <b>CANLI YAPAY ZEKA TAHMİNLERİ</b> {EMOJI['fire']}\n"
-    banner += "⚽ Basketbol 🏀 Tenis 🎾 dahil tüm dünyadan analiz!\n\n"
-    for p in predictions:
-        banner += format_prediction_line(p) + "\n\n"
-    banner += "📡 Yapay zeka analizleri otomatik olarak güncellenir."
-    return banner
+# ================== EMOJİ VE SİMGELER ==================
+EMOJI = {
+    "goal": "⚽",
+    "win": "✅",
+    "lose": "❌",
+    "draw": "🤝",
+    "clock": "⏱️",
+    "fire": "🔥",
+    "ai": "🤖",
+    "star": "⭐",
+    "trend": "📈",
+    "earth": "🌍",
+    "light": "💡",
+}
 
-# 📅 Günlük Kupon Banner
-def create_daily_banner(picks):
-    banner = f"{EMOJI['star']} <b>GÜNLÜK YAPAY ZEKA KUPONU</b> {EMOJI['star']}\n\n"
-    for p in picks:
-        banner += format_prediction_line(p) + "\n\n"
-    banner += "🕓 Günlük analizler her sabah 10:00’da paylaşılır."
-    return banner
+EMOJI_MAP = {
+    "Over 2.5": "🔥",
+    "Under 2.5": "🧊",
+    "BTTS": "⚽⚽",
+    "Home Win": "🏠✅",
+    "Away Win": "✈️✅",
+    "Draw": "🤝",
+}
 
-# 💰 VIP (Kasa) Kupon Banner
-def create_vip_banner(vip_picks):
-    banner = f"{EMOJI['cash']} <b>VIP / KASA KUPONU</b> {EMOJI['lock']}\n\n"
-    for p in vip_picks:
-        banner += format_prediction_line(p) + "\n\n"
-    banner += "💼 Sadece yüksek güven oranlı (%85+) maçlar içerir."
-    return banner
+# ================== LİG BAYRAKLARI ==================
+LEAGUE_FLAGS = {
+    "England": "🏴",
+    "Germany": "🇩🇪",
+    "Spain": "🇪🇸",
+    "Italy": "🇮🇹",
+    "France": "🇫🇷",
+    "Turkey": "🇹🇷",
+    "Portugal": "🇵🇹",
+    "Netherlands": "🇳🇱",
+    "Belgium": "🇧🇪",
+    "Brazil": "🇧🇷",
+    "Argentina": "🇦🇷",
+    "USA": "🇺🇸",
+    "Japan": "🇯🇵",
+    "Korea Republic": "🇰🇷",
+    "Scotland": "🏴",
+    "Norway": "🇳🇴",
+    "Sweden": "🇸🇪",
+    "Greece": "🇬🇷",
+    "Denmark": "🇩🇰",
+    "Switzerland": "🇨🇭",
+    "Austria": "🇦🇹",
+    "Croatia": "🇭🇷",
+    "Serbia": "🇷🇸",
+    "Russia": "🇷🇺",
+    "Poland": "🇵🇱",
+    "Romania": "🇷🇴",
+    "Czech Republic": "🇨🇿",
+    "Hungary": "🇭🇺",
+}
+
+def league_to_flag(country_name: str) -> str:
+    """Ülke adına göre bayrak döndürür."""
+    return LEAGUE_FLAGS.get(country_name, "🌍")
+
+# ================== ORAN VE FORM HESAPLAMALARI ==================
+def ensure_min_odds(odds: float, minimum: float = 1.40) -> float:
+    """Oran çok düşükse minimum değere yuvarla."""
+    return max(odds, minimum)
+
+def calc_form_score(form_string: str) -> float:
+    """
+    Takım formunu puanlar (W=1, D=0.5, L=0)
+    Örnek: "WWDLW" -> 3.5
+    """
+    if not form_string:
+        return 0
+    form = form_string.upper()
+    return form.count("W") + 0.5 * form.count("D")
+
+# ================== YÜZDE VE GÜVEN SKORU ==================
+def confidence_score(probability: float) -> str:
+    """AI tahmini güven seviyesini Türkçe olarak döndürür."""
+    if probability >= 0.85:
+        return "Çok Yüksek Güven 🔥"
+    elif probability >= 0.70:
+        return "Yüksek Güven 💪"
+    elif probability >= 0.55:
+        return "Orta Seviye ⚙️"
+    else:
+        return "Düşük Güven ⚠️"
+
+# ================== BANNER YARDIMCISI ==================
+def format_prediction_line(match):
+    """
+    Maç verilerini banner'a uygun biçimde düzenler.
+    Örnek:
+    🇹🇷 23' | Galatasaray vs Fenerbahçe | 🔥 2.5 ÜST | Güven: Yüksek Güven 💪
+    """
+    flag = league_to_flag(match.get("country", ""))
+    minute = f"{EMOJI['clock']} {match.get('minute', '—')}'"
+    prediction = match.get("prediction", "—")
+    emoji = EMOJI_MAP.get(prediction, "💡")
+    confidence = confidence_score(match.get("confidence", 0.7))
+    home = match.get("home", "Ev Sahibi")
+    away = match.get("away", "Deplasman")
+
+    return f"{flag} {minute} | {home} vs {away} | {emoji} {prediction} | {confidence}"
+
+# ================== GENEL FONKSİYONLAR ==================
+def banner(title: str, matches: list) -> str:
+    """Maç listesini üst başlıkla banner haline getirir."""
+    if not matches:
+        return f"{EMOJI['ai']} {title}\nVeri bulunamadı ⏳"
+
+    lines = [f"{EMOJI['ai']} {title}", "━━━━━━━━━━━━━━━"]
+    for m in matches:
+        lines.append(format_prediction_line(m))
+    return "\n".join(lines)
+
+def random_ai_message() -> str:
+    """AI tarafından rastgele mesaj üretir."""
+    phrases = [
+        "Veriler analiz ediliyor...",
+        "Yapay zeka modeli güncelleniyor 🤖",
+        "Yeni istatistikler taranıyor 📊",
+        "Tahmin motoru çalışıyor ⚙️",
+        "Maç verileri değerlendiriliyor 🔍",
+    ]
+    return random.choice(phrases)
