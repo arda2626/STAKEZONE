@@ -92,7 +92,7 @@ async def main():
     log.info("STAKEDRIP AI ULTRA starting...")
 
     # run one immediate hourly job
-    await send_hourly_predictions(bot)
+    #await send_hourly_predictions(bot)
 
     # schedule jobs (tries scheduler.schedule_jobs and falls back)
     try:
