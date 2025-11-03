@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.10 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.11 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
@@ -25,17 +25,16 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | 
 log = logging.getLogger("stakedrip")
 
 # ================= BASİT BANNER FONKSİYONLARI =================
-# Eğer messages.py yoksa hızlı bir çözüm:
 def create_daily_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('bet', '-')}, {p.get('odds',1.5)}" for p in picks]
+    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','-')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>Günlük Kupon</b>\n" + "\n".join(lines)
 
 def create_vip_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('bet', '-')}, {p.get('odds',1.5)}" for p in picks]
+    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','-')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>VIP Kupon</b>\n" + "\n".join(lines)
 
 def create_live_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('bet', '-')}, {p.get('odds',1.5)}" for p in picks]
+    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','-')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>Canlı Maçlar</b>\n" + "\n".join(lines)
 
 # ================= JOB FUNCTIONS =================
@@ -54,6 +53,9 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=24, path=DB_FILE):
                 continue
             p = ai_predict(m)
+            # prediction yoksa fallback
+            if "prediction" not in p or not p["prediction"]:
+                p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
@@ -90,6 +92,8 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=48, path=DB_FILE):
                 continue
             p = ai_predict(m)
+            if "prediction" not in p or not p["prediction"]:
+                p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
@@ -118,6 +122,8 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
 
         for m in live_matches:
             p = ai_predict(m)
+            if "prediction" not in p or not p["prediction"]:
+                p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds",1.5))
