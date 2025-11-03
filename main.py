@@ -106,7 +106,7 @@ async def build_coupon(min_conf, title, is_live=False):
         f"💰 Oran: <b>{best['odds']:.2f}</b>\n"
         f"📊 AI GÜVEN: <b>%{int(best['confidence']*100)}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🚀 <i>ABONE OL, KAZAN! @stakedrip</i>"
+        "🚀 <i>TEK SITE STAKE! @stakedrip</i>"
     )
     return text
 
