@@ -1,8 +1,10 @@
+# admin.py
+# small admin command handlers (if you want to hook into telegram.ext handlers)
+from telegram.ext import CommandHandler, ContextTypes
 from telegram import Update
-from telegram.ext import ContextTypes
 
-async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot çalışıyor ✅")
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot running.")
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Toplam tahmin: 123")
+def get_handlers():
+    return [CommandHandler("status", cmd_status)]
