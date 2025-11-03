@@ -9,7 +9,7 @@ import uvicorn
 from db import init_db, DB_PATH, mark_posted, was_posted_recently
 from fetch_matches_free import fetch_all_matches
 from prediction import ai_predict
-from banners import create_daily_banner, create_vip_banner, create_live_banner
+from messages import create_daily_banner, create_vip_banner, create_live_banner
 
 # ================= CONFIG =================
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
