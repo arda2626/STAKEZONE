@@ -1,58 +1,67 @@
 # utils.py
 from datetime import datetime, timezone, timedelta
+import sqlite3
+import logging
+import os
+from typing import List, Dict
 
-# ---------------- BASIC HELPERS ----------------
-def ensure_min_odds(odds, min_odds=1.2):
-    return max(odds, min_odds)
+log = logging.getLogger(__name__)
 
-def calc_form_score(team_stats):
-    return sum(team_stats)/len(team_stats) if team_stats else 0
+# Time helpers
+def utcnow(): return datetime.now(timezone.utc)
+def turkey_now(): return datetime.now(timezone(timedelta(hours=3)))
 
-def combine_confidence(*args):
-    return sum(args)/len(args) if args else 0
+# Odds helper
+def ensure_min_odds(x: float, min_odds: float = 1.2) -> float:
+    try:
+        v = float(x)
+        return round(max(v, min_odds), 2)
+    except Exception:
+        return min_odds
 
-def utcnow():
-    return datetime.now(timezone.utc)
+# small form calc
+def calc_form_score(results: List[str]) -> float:
+    # results: ["W","D","L"...] -> simple scoring
+    if not results: return 0.5
+    score = 0.0
+    for r in results:
+        if r.upper().startswith("W"): score += 1.0
+        elif r.upper().startswith("D"): score += 0.6
+        else: score += 0.2
+    return score / len(results)
 
-def turkey_now():
-    return datetime.now(timezone(timedelta(hours=3)))
+def combine_confidence(*args) -> float:
+    vals = [float(a) for a in args if a is not None]
+    if not vals: return 0.5
+    return sum(vals)/len(vals)
 
-# ---------------- EMOJI & BANNER ----------------
-EMOJI = {
-    "futbol":"⚽","nba":"🏀","tenis":"🎾","ding":"🔔","cash":"💰",
-    "win":"✅","lose":"❌","clock":"🕒","cup":"🏆","info":"ℹ️"
-}
-
-def banner(title_short="LIVE"):
-    return "\n".join(["═"*38, "💎 STAKEDRIP LIVE PICKS 💎", f"🔥 AI CANLI TAHMİN ({title_short}) 🔥", "═"*38])
-
-# ---------------- COUNTRY / LEAGUE EMOJI MAP ----------------
+# Emoji map (100+ common keys + extras)
+EMOJI = {"futbol":"⚽","nba":"🏀","tenis":"🎾","ding":"🔔","cash":"💰","win":"✅","lose":"❌","clock":"🕒","cup":"🏆","info":"ℹ️"}
 EMOJI_MAP = {
     "turkey":"🇹🇷","süper lig":"🇹🇷","super lig":"🇹🇷",
-    "england":"🏴","premier league":"🏴",
-    "spain":"🇪🇸","laliga":"🇪🇸","la liga":"🇪🇸",
-    "italy":"🇮🇹","serie a":"🇮🇹",
+    "england":"🏴","premier league":"🏴","man city":"🏴",
+    "spain":"🇪🇸","la liga":"🇪🇸","laliga":"🇪🇸",
+    "italy":"🇮🇹","serie a":"🇮🇹","inter":"🇮🇹",
     "germany":"🇩🇪","bundesliga":"🇩🇪",
     "france":"🇫🇷","ligue 1":"🇫🇷",
     "portugal":"🇵🇹","netherlands":"🇳🇱","belgium":"🇧🇪",
     "scotland":"🏴","sweden":"🇸🇪","norway":"🇳🇴","denmark":"🇩🇰",
     "poland":"🇵🇱","switzerland":"🇨🇭","austria":"🇦🇹",
     "russia":"🇷🇺","ukraine":"🇺🇦",
-    "usa":"🇺🇸","mls":"🇺🇸","canada":"🇨🇦","mexico":"🇲🇽","brazil":"🇧🇷","argentina":"🇦🇷",
-    "japan":"🇯🇵","korea":"🇰🇷","china":"🇨🇳","australia":"🇦🇺","saudi":"🇸🇦","qatar":"🇶🇦",
-    "egypt":"🇪🇬","morocco":"🇲🇦","south africa":"🇿🇦","nigeria":"🇳🇬","ghana":"🇬🇭",
-    "conmebol":"🌎","concacaf":"🌎","caf":"🌍","uefa":"🇪🇺","champions league":"🏆",
-    "europa league":"🇪🇺","fifa":"🌍",
+    "usa":"🇺🇸","mls":"🇺🇸","canada":"🇨🇦","mexico":"🇲🇽",
+    "brazil":"🇧🇷","argentina":"🇦🇷","colombia":"🇨🇴",
+    "japan":"🇯🇵","korea":"🇰🇷","china":"🇨🇳","australia":"🇦🇺",
+    "saudi":"🇸🇦","qatar":"🇶🇦","egypt":"🇪🇬","morocco":"🇲🇦","south africa":"🇿🇦",
+    "nigeria":"🇳🇬","ghana":"🇬🇭",
+    "champions league":"🏆","europa league":"🇪🇺","uefa":"🇪🇺","fifa":"🌍",
     "nba":"🇺🇸🏀","euroleague":"🏀🇪🇺","atp":"🎾","wta":"🎾","itf":"🎾"
 }
-
-EXTRA_MATCH = { 
-    "super lig":"turkey","süper lig":"turkey","premier":"england","la liga":"spain",
-    "serie a":"italy","bundesliga":"germany","ligue 1":"france",
-    "mls":"usa","nba":"nba","euroleague":"euroleague","atp":"atp","wta":"wta"
+EXTRA_MATCH = {
+    "premier":"england","la liga":"spain","serie a":"italy","bundesliga":"germany","ligue 1":"france",
+    "mls":"usa","super lig":"turkey","nba":"nba","euroleague":"euroleague","atp":"atp","wta":"wta"
 }
 
-def league_to_flag(league_name):
+def league_to_flag(league_name: str) -> str:
     if not league_name: return "🏟️"
     s = str(league_name).lower()
     for k,v in EMOJI_MAP.items():
@@ -63,36 +72,54 @@ def league_to_flag(league_name):
             return EMOJI_MAP.get(mapped, "🏟️")
     return "🏟️"
 
-# ---------------- PREDICTION STORAGE ----------------
-# Hafızada saklamak için basit liste
-PREDICTIONS_DB = []
+# Simple sqlite persistence (keeps same table shape you used)
+def init_db(db_path: str):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS predictions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id TEXT,
+        source TEXT,
+        sport TEXT,
+        league TEXT,
+        home TEXT,
+        away TEXT,
+        bet TEXT,
+        odds REAL,
+        prob INTEGER,
+        created_at TEXT,
+        msg_id INTEGER,
+        status TEXT DEFAULT 'pending',
+        resolved_at TEXT,
+        note TEXT
+    )""")
+    con.commit(); con.close()
 
-def save_prediction(prediction: dict):
-    PREDICTIONS_DB.append(prediction)
+def save_prediction(db_path: str, entry: Dict):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("""
+    INSERT INTO predictions (event_id, source, sport, league, home, away, bet, odds, prob, created_at, msg_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (entry.get("event_id"), entry.get("source"), entry.get("sport"), entry.get("league"),
+          entry.get("home"), entry.get("away"), entry.get("bet"), entry.get("odds"), entry.get("prob"),
+          entry.get("created_at"), entry.get("msg_id")))
+    con.commit(); con.close()
 
-def mark_prediction(pred_id, status, result):
-    for p in PREDICTIONS_DB:
-        if p.get("id") == pred_id:
-            p["status"] = status
-            p["result"] = result
-            break
+def get_pending_predictions(db_path: str):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("SELECT id,event_id,source,sport,league,home,away,bet,odds FROM predictions WHERE status='pending'")
+    rows = cur.fetchall(); con.close(); return rows
 
-def get_pending_predictions():
-    return [p for p in PREDICTIONS_DB if p.get("status") is None]
+def mark_prediction(db_path: str, id_, status, note=""):
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
+    cur.execute("UPDATE predictions SET status=?, resolved_at=?, note=? WHERE id=?", (status, datetime.now(timezone.utc).isoformat(), note, id_))
+    con.commit(); con.close()
 
-def day_summary_between(start_iso, end_iso):
-    start = datetime.fromisoformat(start_iso)
-    end = datetime.fromisoformat(end_iso)
-    counts = {"won":0,"lost":0,"pending":0,"unknown":0}
-    for p in PREDICTIONS_DB:
-        created_at = datetime.fromisoformat(p.get("created_at"))
-        if start <= created_at <= end:
-            status = p.get("status") or "pending"
-            counts[status] = counts.get(status,0)+1
-    return counts.items()
-
-def build_live_text(predictions):
-    lines = []
-    for p in predictions:
-        lines.append(f"{p.get('home')} vs {p.get('away')} • Tahmin: {p.get('bet_text','')} • Oran: {p.get('odds')}")
-    return "\n".join(lines)
+def day_summary_between(db_path: str, start_iso: str, end_iso: str):
+    con = sqlite3.connect(db_path); cur = con.cursor()
+    cur.execute("SELECT status, COUNT(*) FROM predictions WHERE created_at BETWEEN ? AND ? GROUP BY status", (start_iso, end_iso))
+    rows = cur.fetchall(); con.close(); return rows
