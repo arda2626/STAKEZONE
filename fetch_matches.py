@@ -1,4 +1,3 @@
-# ================== fetch_matches.py — STAKEDRIP AI ULTRA v5.4 ==================
 import aiohttp
 import logging
 
@@ -9,7 +8,7 @@ API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 
 THE_ODDS_API_KEY = "41eb74e295dfecf0a675417cbb56cf4d"
-THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports/soccer/odds"
+THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports"
 
 SPORT_ENDPOINTS = {
     "football": f"{API_FOOTBALL_BASE}/fixtures?live=all",
@@ -30,7 +29,6 @@ async def fetch_api(session, url, api_key, sport):
                 return []
 
             matches = []
-            # The Odds API response farklı yapıda geliyor
             for item in data.get("response", data):
                 try:
                     if sport == "football":
@@ -101,33 +99,20 @@ async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
         all_matches = []
 
-        # Önce API-Football
-        try:
-            football_matches = await fetch_api(session, SPORT_ENDPOINTS["football"], API_FOOTBALL_KEY, "football")
-            log.info(f"Fetched {len(football_matches)} football matches from API-Football.")
-        except Exception as e:
-            log.error(f"football fetch_all_matches error: {e}")
-            football_matches = []
+        # 1️⃣ Futbol
+        football_matches = await fetch_api(session, SPORT_ENDPOINTS["football"], API_FOOTBALL_KEY, "football")
+        log.info(f"Fetched {len(football_matches)} football matches from API-Football.")
 
-        # Eğer boşsa The Odds API'den çek (tüm ülkeler, tüm ligler)
         if not football_matches:
-            try:
-                url = f"{THE_ODDS_API_BASE}?apiKey={THE_ODDS_API_KEY}&regions=all&markets=h2h,totals,spreads"
-                football_matches = await fetch_api(session, url, THE_ODDS_API_KEY, "theodds")
-                log.info(f"Fetched {len(football_matches)} football matches from The Odds API (fallback).")
-            except Exception as e:
-                log.error(f"The Odds API fetch error: {e}")
-                football_matches = []
-
+            url = f"{THE_ODDS_API_BASE}/soccer/odds/?apiKey={THE_ODDS_API_KEY}&regions=all&markets=h2h,totals,spreads"
+            football_matches = await fetch_api(session, url, THE_ODDS_API_KEY, "theodds")
+            log.info(f"Fetched {len(football_matches)} football matches from The Odds API (fallback).")
         all_matches.extend(football_matches)
 
-        # Diğer sporlar
+        # 2️⃣ Basketbol ve Tenis
         for sport in ["basketball", "tennis"]:
-            try:
-                matches = await fetch_api(session, SPORT_ENDPOINTS[sport], API_FOOTBALL_KEY, sport)
-                all_matches.extend(matches)
-                log.info(f"Fetched {len(matches)} {sport} matches.")
-            except Exception as e:
-                log.error(f"{sport} fetch_all_matches error: {e}")
+            matches = await fetch_api(session, SPORT_ENDPOINTS[sport], API_FOOTBALL_KEY, sport)
+            all_matches.extend(matches)
+            log.info(f"Fetched {len(matches)} {sport} matches.")
 
         return all_matches
