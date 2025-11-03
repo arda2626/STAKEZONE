@@ -12,7 +12,7 @@ from prediction import ai_predict
 from utils import league_to_flag
 
 # ================= CONFIG =================
-TELEGRAM_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 DB_FILE = DB_PATH
 
