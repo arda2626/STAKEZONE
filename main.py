@@ -1,6 +1,6 @@
-# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.6 ==================
+# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.7 ==================
 import asyncio, logging
-from datetime import time as dt_time, timezone
+from datetime import datetime, timedelta, timezone, time as dt_time
 from telegram.ext import Application, JobQueue, ContextTypes, CommandHandler
 from telegram import Update
 from fastapi import FastAPI, Request
@@ -19,10 +19,11 @@ DB_FILE = DB_PATH
 MAX_LIVE_PICKS = 3
 MIN_CONFIDENCE = 0.60
 MIN_ODDS = 1.20
-ADMIN_IDS = [123456789]  # Senin Telegram ID’n
 
 WEBHOOK_PATH = "/stakedrip"
 WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
+
+ADMIN_ID = 1939992377  # Senin Telegram ID'n
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
@@ -59,7 +60,20 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
         matches = await fetch_all_matches()
-        upcoming = [m for m in matches if not (m.get("live") or m.get("is_live"))]
+        now = datetime.now(timezone.utc)
+        end_time = now + timedelta(hours=24)
+        upcoming = []
+        for m in matches:
+            if m.get("live") or m.get("is_live"):
+                continue
+            match_time_str = m.get("date")
+            if match_time_str:
+                match_time = datetime.fromisoformat(match_time_str).astimezone(timezone.utc)
+                if now <= match_time <= end_time:
+                    upcoming.append(m)
+            else:
+                upcoming.append(m)
+
         picks = []
         for m in upcoming:
             p = ai_predict(m)
@@ -68,18 +82,15 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             p.setdefault("odds", m.get("odds",1.5))
             p.setdefault("confidence", p.get("confidence",0.5))
             picks.append(p)
-        # 24 saat içinde oynanacak maçları al
-        from datetime import datetime, timedelta
-        now = datetime.utcnow()
-        next_24h = now + timedelta(hours=24)
-        picks_24h = [p for p in picks if "time" in p and now <= p["time"] <= next_24h]
-        chosen = sorted(picks_24h, key=lambda x: x.get("confidence",0), reverse=True)
+
+        chosen = sorted(picks, key=lambda x: x.get("confidence",0), reverse=True)[:3]
+
         if chosen:
             text = create_daily_banner(chosen)
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             log.info("daily_coupon: gönderildi")
         else:
-            log.info("daily_coupon: 24 saat içinde maç yok")
+            log.info("daily_coupon: uygun maç yok")
     except Exception:
         log.exception("daily_coupon hata:")
 
@@ -112,53 +123,43 @@ async def results_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("results_job hata:")
 
-# ================= ADMIN TEST COMMANDS =================
-async def test_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("Yetkin yok.")
+# ================= ADMIN TEST COMMAND =================
+async def test_daily_coupon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
         return
-    matches = await fetch_all_matches()
-    live = [m for m in matches if m.get("live") or m.get("is_live")]
-    chosen = [ai_predict(m) for m in live[:3]]
-    if chosen:
-        text = create_live_banner(chosen)
-        await update.message.reply_text(text, parse_mode="HTML")
-    else:
-        await update.message.reply_text("Test: Uygun canlı maç yok.")
 
-async def test_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("Yetkin yok.")
-        return
-    matches = await fetch_all_matches()
-    upcoming = [m for m in matches if not (m.get("live") or m.get("is_live"))]
-    picks = [ai_predict(m) for m in upcoming[:10]]
-    if picks:
-        text = create_daily_banner(picks)
-        await update.message.reply_text(text, parse_mode="HTML")
-    else:
-        await update.message.reply_text("Test: Uygun günlük maç yok.")
+    try:
+        matches = await fetch_all_matches()
+        now = datetime.now(timezone.utc)
+        end_time = now + timedelta(hours=24)
+        upcoming = []
+        for m in matches:
+            if m.get("live") or m.get("is_live"):
+                continue
+            match_time_str = m.get("date")
+            if match_time_str:
+                match_time = datetime.fromisoformat(match_time_str).astimezone(timezone.utc)
+                if now <= match_time <= end_time:
+                    upcoming.append(m)
+            else:
+                upcoming.append(m)
 
-async def test_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("Yetkin yok.")
-        return
-    matches = await fetch_all_matches()
-    picks = [ai_predict(m) for m in matches[:10]]
-    if picks:
-        text = create_vip_banner(picks)
-        await update.message.reply_text(text, parse_mode="HTML")
-    else:
-        await update.message.reply_text("Test: Uygun VIP maç yok.")
+        picks = [ai_predict(m) for m in upcoming]
+        chosen = sorted(picks, key=lambda x: x.get("confidence",0), reverse=True)[:3]
+
+        if chosen:
+            text = create_daily_banner(chosen)
+            await update.message.reply_text(text, parse_mode="HTML")
+        else:
+            await update.message.reply_text("Uygun maç bulunamadı.")
+    except Exception:
+        await update.message.reply_text("Hata oluştu.")
 
 # ================= FASTAPI + TELEGRAM =================
 fastapi_app = FastAPI()
 telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
-
-# Add test handlers
-telegram_app.add_handler(CommandHandler("test_live", test_live))
-telegram_app.add_handler(CommandHandler("test_daily", test_daily))
-telegram_app.add_handler(CommandHandler("test_vip", test_vip))
+telegram_app.add_handler(CommandHandler("test_daily", test_daily_coupon))
 
 @fastapi_app.on_event("startup")
 async def startup():
