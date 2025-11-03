@@ -1,12 +1,15 @@
-from utils import banner as util_banner, league_to_flag, EMOJI, EMOJI_MAP
+# ================== banners.py — STAKEDRIP AI ULTRA v5.4 ==================
+from utils import banner as util_banner, league_to_flag, EMOJI
 from html import escape
 from datetime import datetime, timezone, timedelta
 
-# Türkiye saati
+# ================== TÜRKİYE SAATİ ==================
 def current_time_tr():
     tr_tz = timezone(timedelta(hours=3))
     return datetime.now(tr_tz).strftime("%d %B %H:%M")  # Örn: 03 Kasım 22:57
 
+
+# ================== CANLI MAÇ BANNER ==================
 def create_live_banner(predictions):
     update_time = current_time_tr()
     head = util_banner(f"⚡️ CANLI MAÇLAR ⚽️  |  Güncelleme: {update_time}", predictions)
@@ -29,13 +32,14 @@ def create_live_banner(predictions):
         lines.append(f"🧠 Güven Oranı: <b>%{confidence}</b>")
         lines.append("━━━━━━━━━━━━━━━━━━")
 
-    lines.append(f"\n{EMOJI.get('ding','🔔')} Minimum oran: 1.20 • Maksimum: 3 maç")
+    lines.append(f"\n🔔 Minimum oran: 1.20 • Maksimum: 3 maç")
     return "\n".join(lines)
 
 
+# ================== GÜNLÜK KUPON BANNER ==================
 def create_daily_banner(predictions):
     update_time = current_time_tr()
-    head = util_banner(f"📅 GÜNLÜK KUPON 🎯  |  {update_time}")
+    head = util_banner(f"📅 GÜNLÜK KUPON 🎯  |  {update_time}", predictions)
     total = 1.0
     lines = [f"<pre>{escape(head)}</pre>", ""]
 
@@ -53,9 +57,10 @@ def create_daily_banner(predictions):
     return "\n".join(lines)
 
 
+# ================== VIP KASA BANNER ==================
 def create_vip_banner(predictions):
     update_time = current_time_tr()
-    head = util_banner(f"💎 VIP KASA 🎯  |  {update_time}")
+    head = util_banner(f"💎 VIP KASA 🎯  |  {update_time}", predictions)
     total = 1.0
     lines = [f"<pre>{escape(head)}</pre>", ""]
 
