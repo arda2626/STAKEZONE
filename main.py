@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.11 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.12 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
@@ -24,17 +24,38 @@ WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
-# ================= BASİT BANNER FONKSİYONLARI =================
+# ================= FLAG FUNCTION =================
+def country_flag(country_name: str) -> str:
+    # Basit ülke bayrağı map
+    flags = {
+        "Italy": "🇮🇹", "Spain": "🇪🇸", "England": "🏴", "Portugal": "🇵🇹",
+        "USA": "🇺🇸", "Germany": "🇩🇪", "France": "🇫🇷", "Turkey": "🇹🇷"
+    }
+    return flags.get(country_name, "🌍")
+
+# ================= BANNER FUNCTIONS =================
 def create_daily_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','-')}, {p.get('odds',1.5)}" for p in picks]
+    lines = []
+    for p in picks:
+        flag = country_flag(p.get("country",""))
+        prediction = p.get("prediction","Tahmin Yok")
+        lines.append(f"{flag} {p['home']} vs {p['away']} | {prediction}, {p.get('odds',1.5)}")
     return "<b>Günlük Kupon</b>\n" + "\n".join(lines)
 
 def create_vip_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','-')}, {p.get('odds',1.5)}" for p in picks]
+    lines = []
+    for p in picks:
+        flag = country_flag(p.get("country",""))
+        prediction = p.get("prediction","Tahmin Yok")
+        lines.append(f"{flag} {p['home']} vs {p['away']} | {prediction}, {p.get('odds',1.5)}")
     return "<b>VIP Kupon</b>\n" + "\n".join(lines)
 
 def create_live_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','-')}, {p.get('odds',1.5)}" for p in picks]
+    lines = []
+    for p in picks:
+        flag = country_flag(p.get("country",""))
+        prediction = p.get("prediction","Tahmin Yok")
+        lines.append(f"{flag} {p['home']} vs {p['away']} | {prediction}, {p.get('odds',1.5)}")
     return "<b>Canlı Maçlar</b>\n" + "\n".join(lines)
 
 # ================= JOB FUNCTIONS =================
@@ -53,13 +74,13 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=24, path=DB_FILE):
                 continue
             p = ai_predict(m)
-            # prediction yoksa fallback
             if "prediction" not in p or not p["prediction"]:
                 p["prediction"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
             p.setdefault("confidence", p.get("confidence", 0.5))
+            p.setdefault("country", m.get("country",""))
             if p["confidence"] >= MIN_CONFIDENCE and p["odds"] >= MIN_ODDS:
                 picks.append((m["id"], p))
 
@@ -98,11 +119,11 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
             p.setdefault("confidence", p.get("confidence", 0.5))
+            p.setdefault("country", m.get("country",""))
             if p["confidence"] >= MIN_CONFIDENCE_VIP and p["odds"] >= MIN_ODDS:
                 picks.append((m["id"], p))
 
         if picks:
-            chosen = sorted([p for mid,p in picks], key=lambda x: x["confidence"], reverse=True)[:1]
             text = create_vip_banner([p for mid,p in picks])
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             for mid, _ in picks:
@@ -127,6 +148,7 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds",1.5))
+            p.setdefault("country", m.get("country",""))
             if p["odds"] >= MIN_ODDS:
                 picks.append(p)
 
