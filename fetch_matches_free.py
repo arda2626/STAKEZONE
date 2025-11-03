@@ -1,4 +1,3 @@
-# fetch_matches_free.py — Güvenli fetch + Bayrak desteği
 import aiohttp
 import logging
 from datetime import datetime, timezone
@@ -9,6 +8,7 @@ log = logging.getLogger("stakedrip")
 FOOTBALL_API_KEY = "70b1ee7a9db547649988d3898503771d"  # Football-Data.org
 BASKETBALL_API = "https://www.balldontlie.io/api/v1/games"
 TENNIS_API = "https://www.scorebat.com/video-api/v3/"
+THESPORTSDB_KEY = "457761c3fe3072466a8899578fefc5e4"
 
 # ================== FETCH FUNCTIONS ==================
 async def fetch_football(session):
@@ -25,19 +25,32 @@ async def fetch_football(session):
                 match_time = m.get("utcDate")
                 if match_time:
                     dt = datetime.fromisoformat(match_time.replace("Z", "+00:00"))
-                    matches.append({
+                    match = {
                         "id": m.get("id"),
                         "sport": "football",
                         "home": m.get("homeTeam", {}).get("name", "Unknown"),
                         "away": m.get("awayTeam", {}).get("name", "Unknown"),
                         "league": m.get("competition", {}).get("name", "Bilinmeyen Lig"),
-                        "country_home": m.get("homeTeam", {}).get("area", {}).get("countryCode", ""),
-                        "country_away": m.get("awayTeam", {}).get("area", {}).get("countryCode", ""),
-                        "odds": 1.5,
+                        "country": m.get("competition", {}).get("area", {}).get("name", ""),
+                        "odds": 1.5,          # default
                         "confidence": 0.5,
                         "date": dt.isoformat(),
                         "live": False,
-                    })
+                    }
+
+                    # --- THESPORTSDB den oran çek ---
+                    try:
+                        odds_url = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}/lookupevent.php?id={m.get('id')}"
+                        async with session.get(odds_url, timeout=10) as r2:
+                            if r2.status == 200:
+                                odds_data = await r2.json()
+                                event = odds_data.get("events", [])[0] if odds_data.get("events") else {}
+                                if event:
+                                    match["odds"] = float(event.get("strHomeWinOdds", match["odds"]))
+                    except Exception as e_odds:
+                        log.warning(f"ThesportsDB odds fetch failed: {e_odds}")
+
+                    matches.append(match)
             return matches
     except Exception as e:
         log.error(f"football fetch exception: {e}")
@@ -60,8 +73,7 @@ async def fetch_basketball(session):
                         "home": m.get("home_team", {}).get("full_name", "Unknown"),
                         "away": m.get("visitor_team", {}).get("full_name", "Unknown"),
                         "league": "NBA",
-                        "country_home": "US",
-                        "country_away": "US",
+                        "country": "USA",
                         "odds": 1.6,
                         "confidence": 0.5,
                         "date": dt.isoformat(),
@@ -93,8 +105,7 @@ async def fetch_tennis(session):
                         "home": event[0],
                         "away": event[1],
                         "league": m.get("competition", {}).get("name", "Tenis Turnuvası"),
-                        "country_home": "",
-                        "country_away": "",
+                        "country": "",
                         "odds": 1.7,
                         "confidence": 0.5,
                         "date": datetime.now(timezone.utc).isoformat(),
