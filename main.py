@@ -13,7 +13,7 @@ from utils import league_to_flag, get_live_minute, get_live_events
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
-THE_ODDS_API_KEY = "41eb74e295dfecf0a675417cbb56cf4d"
+THE_ODDS_API_KEY = "9f306dba7dc52a62c2ccdbe581543dee"
 
 TR_TIME = timezone(timedelta(hours=3))
 
