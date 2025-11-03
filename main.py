@@ -65,7 +65,7 @@ async def build_coupon(min_conf, title, live=False):
             "confidence": round(0.85 + random.uniform(0.02, 0.08), 2)
         }
 
-live_stats = await get_live_events(best["id"]) if live else {"corners": 0, "cards": 0}
+live_stats = await get_live_events(best.get("id", "demo")) if live else {"corners": 0, "cards": 0}
 
     return (
         f"{neon_banner(title, best['confidence'])}\n"
