@@ -1,6 +1,6 @@
 # db.py — küçük DB yardımcıları (SQLite)
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 DB_PATH = "stakedrip.db"
 
@@ -38,11 +38,15 @@ def mark_posted(event_id, path=None):
     p = path or DB_PATH
     con = sqlite3.connect(p)
     cur = con.cursor()
-    cur.execute("INSERT OR REPLACE INTO posted_events (event_id, posted_at) VALUES (?, ?)", (str(event_id), datetime.now(timezone.utc).isoformat()))
+    cur.execute(
+        "INSERT OR REPLACE INTO posted_events (event_id, posted_at) VALUES (?, ?)", 
+        (str(event_id), datetime.now(timezone.utc).isoformat())
+    )
     con.commit()
     con.close()
 
 def was_posted_recently(event_id, hours=24, path=None):
+    """Verilen event_id daha önce post edildi mi, belirtilen saat içinde mi kontrol eder."""
     p = path or DB_PATH
     con = sqlite3.connect(p)
     cur = con.cursor()
@@ -52,5 +56,4 @@ def was_posted_recently(event_id, hours=24, path=None):
     if not row:
         return False
     posted = datetime.fromisoformat(row[0])
-    from datetime import datetime, timezone, timedelta
     return (datetime.now(timezone.utc) - posted) < timedelta(hours=hours)
