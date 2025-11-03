@@ -1,94 +1,185 @@
-# ================== messages.py — STAKEDRIP AI ULTRA v5.10 ==================
-from utils import banner as util_banner, league_to_flag
-from html import escape
-from datetime import datetime, timezone, timedelta
+# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.9 ==================
+import asyncio, logging
+from datetime import datetime, timedelta, timezone
+from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
+from telegram import Update
+from fastapi import FastAPI, Request
+import uvicorn
 
-# ================== TÜRKİYE SAATİ ==================
-def current_time_tr():
-    tr_tz = timezone(timedelta(hours=3))
-    return datetime.now(tr_tz).strftime("%d %B %H:%M")  # Örn: 03 Kasım 22:57
+from db import init_db, DB_PATH, mark_posted, was_posted_recently
+from fetch_matches_free import fetch_all_matches
+from prediction import ai_predict
+from banners import create_daily_banner, create_vip_banner, create_live_banner
 
-# ================== CANLI MAÇ BANNER ==================
-def create_live_banner(predictions):
-    update_time = current_time_tr()
-    head = util_banner(f"⚡️🔥 CANLI MAÇLAR ⚽️ | Güncelleme: {update_time}", predictions)
-    lines = [f"<pre>{escape(head)}</pre>", ""]
+# ================= CONFIG =================
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
+CHANNEL_ID = "@stakedrip"
+DB_FILE = DB_PATH
+MIN_CONFIDENCE = 0.60
+MIN_CONFIDENCE_VIP = 0.80
+MIN_ODDS = 1.20
+WEBHOOK_PATH = "/stakedrip"
+WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 
-    for i, p in enumerate(predictions, 1):
-        flag = league_to_flag(p.get("league"))
-        league = escape(p.get("league", "Bilinmiyor"))
-        minute = p.get("minute", "")
-        home = escape(p.get("home", "-"))
-        away = escape(p.get("away", "-"))
-        bet = escape(str(p.get("bet", "Tahmin Yok")))
-        odds = p.get("odds", 1.5)
-        confidence = int(p.get("confidence", 0) * 100)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
+log = logging.getLogger("stakedrip")
 
-        lines.append(f"🌟 {i}. <b>{home}</b> vs <b>{away}</b> {flag}")
-        lines.append(f"🏟️ {league} • ⏱️ {minute}'")
-        lines.append(f"🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
-        lines.append(f"🧠 Güven: <b>%{confidence}</b>")
-        lines.append("🔹" * 15)
+# ================= JOB FUNCTIONS =================
+async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
+    bot = ctx.bot
+    try:
+        matches = await fetch_all_matches()
+        upcoming = [m for m in matches if not m.get("live")]
+        now = datetime.now(timezone.utc)
+        picks = []
 
-    lines.append(f"\n🔔 Minimum oran: 1.20 • Maksimum 3 maç")
-    return "\n".join(lines)
+        for m in upcoming:
+            match_time = datetime.fromisoformat(m.get("date"))
+            if match_time > now + timedelta(hours=24):
+                continue
+            if was_posted_recently(m["id"], hours=24, path=DB_FILE):
+                continue
+            p = ai_predict(m)
+            p.setdefault("home", m.get("home"))
+            p.setdefault("away", m.get("away"))
+            p.setdefault("odds", m.get("odds", 1.5))
+            p.setdefault("confidence", p.get("confidence", 0.5))
+            if p["confidence"] >= MIN_CONFIDENCE and p["odds"] >= MIN_ODDS:
+                picks.append((m["id"], p))
 
-# ================== GÜNLÜK KUPON BANNER ==================
-def create_daily_banner(predictions):
-    update_time = current_time_tr()
-    head = util_banner(f"📅 GÜNLÜK KUPON 🎯 | {update_time}", predictions)
-    total = 1.0
-    lines = [f"<pre>{escape(head)}</pre>", ""]
+        chosen = [p for mid,p in picks]
+        chosen = sorted(chosen, key=lambda x: x.get("confidence",0), reverse=True)
+        if chosen:
+            text = create_daily_banner(chosen)
+            await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+            for mid, _ in picks:
+                mark_posted(mid, path=DB_FILE)
+            log.info(f"daily_coupon: {len(chosen)} tahmin gönderildi.")
+        else:
+            log.info("daily_coupon: uygun maç yok")
+    except Exception:
+        log.exception("daily_coupon hata:")
 
-    for i, p in enumerate(predictions, 1):
-        flag = league_to_flag(p.get("league"))
-        home = escape(p.get("home", "-"))
-        away = escape(p.get("away", "-"))
-        bet = escape(str(p.get("bet", "Tahmin Yok")))
-        odds = p.get("odds", 1.5)
-        total *= odds
+async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
+    bot = ctx.bot
+    try:
+        matches = await fetch_all_matches()
+        upcoming = [m for m in matches if not m.get("live")]
+        now = datetime.now(timezone.utc)
+        picks = []
 
-        # Maç tarihini TR saatine çevir
-        try:
-            match_dt = datetime.fromisoformat(p.get("date")).astimezone(timezone(timedelta(hours=3)))
-            match_date = match_dt.strftime("%d %b %H:%M")
-        except:
-            match_date = "Tarih Yok"
+        for m in upcoming:
+            match_time = datetime.fromisoformat(m.get("date"))
+            if match_time > now + timedelta(hours=24):
+                continue
+            if was_posted_recently(m["id"], hours=48, path=DB_FILE):
+                continue
+            p = ai_predict(m)
+            p.setdefault("home", m.get("home"))
+            p.setdefault("away", m.get("away"))
+            p.setdefault("odds", m.get("odds", 1.5))
+            p.setdefault("confidence", p.get("confidence", 0.5))
+            if p["confidence"] >= MIN_CONFIDENCE_VIP and p["odds"] >= MIN_ODDS:
+                picks.append((m["id"], p))
 
-        lines.append(f"⚽️ {i}. {home} vs {away} {flag}")
-        lines.append(f"🗓️ Tarih: {match_date} • 🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
-        lines.append("🌟" * 15)
+        if picks:
+            chosen = sorted([p for mid,p in picks], key=lambda x: x["confidence"], reverse=True)[:1]
+            text = create_vip_banner(chosen)
+            await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+            for mid, _ in picks:
+                mark_posted(mid, path=DB_FILE)
+            log.info("vip_coupon: VIP kupon gönderildi.")
+        else:
+            log.info("vip_coupon: uygun maç yok")
+    except Exception:
+        log.exception("vip_coupon hata:")
 
-    lines.append(f"💵 Toplam Oran: <b>{round(total,2)}</b>")
-    lines.append(f"🕒 Güncelleme: {update_time}")
-    return "\n".join(lines)
+async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
+    bot = ctx.bot
+    try:
+        matches = await fetch_all_matches()
+        live_matches = [m for m in matches if m.get("live")]
+        picks = []
 
-# ================== VIP KASA BANNER ==================
-def create_vip_banner(predictions):
-    update_time = current_time_tr()
-    head = util_banner(f"💎 VIP KASA 🎯 | {update_time}", predictions)
-    total = 1.0
-    lines = [f"<pre>{escape(head)}</pre>", ""]
+        for m in live_matches:
+            p = ai_predict(m)
+            p.setdefault("home", m.get("home"))
+            p.setdefault("away", m.get("away"))
+            p.setdefault("odds", m.get("odds",1.5))
+            if p["odds"] >= MIN_ODDS:
+                picks.append(p)
 
-    for i, p in enumerate(predictions, 1):
-        flag = league_to_flag(p.get("league"))
-        home = escape(p.get("home", "-"))
-        away = escape(p.get("away", "-"))
-        bet = escape(str(p.get("bet", "Tahmin Yok")))
-        odds = p.get("odds", 1.5)
-        total *= odds
+        if picks:
+            text = create_live_banner(picks)
+            await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+            log.info(f"hourly_live: {len(picks)} canlı maç gönderildi.")
+        else:
+            log.info("hourly_live: uygun canlı maç yok")
+    except Exception:
+        log.exception("hourly_live hata:")
 
-        # Maç tarihini TR saatine çevir
-        try:
-            match_dt = datetime.fromisoformat(p.get("date")).astimezone(timezone(timedelta(hours=3)))
-            match_date = match_dt.strftime("%d %b %H:%M")
-        except:
-            match_date = "Tarih Yok"
+# ================= ADMIN COMMAND =================
+async def test_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await daily_coupon_job(context)
+        await update.message.reply_text("Test: Günlük kupon çalıştırıldı.")
+    except Exception:
+        log.exception("test_daily hata:")
+        await update.message.reply_text("Test sırasında hata oluştu.")
 
-        lines.append(f"🏆 {i}. {home} vs {away} {flag}")
-        lines.append(f"🗓️ Tarih: {match_date} • 🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
-        lines.append("💠" * 15)
+async def test_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await vip_coupon_job(context)
+        await update.message.reply_text("Test: VIP kupon çalıştırıldı.")
+    except Exception:
+        log.exception("test_vip hata:")
+        await update.message.reply_text("Test sırasında hata oluştu.")
 
-    lines.append(f"💰 Potansiyel Kazanç: <b>{round(total,2)}</b>")
-    lines.append(f"🕒 Güncelleme: {update_time}")
-    return "\n".join(lines)
+async def test_live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await hourly_live_job(context)
+        await update.message.reply_text("Test: Canlı maç kuponu çalıştırıldı.")
+    except Exception:
+        log.exception("test_live hata:")
+        await update.message.reply_text("Test sırasında hata oluştu.")
+
+# ================= FASTAPI + TELEGRAM =================
+from contextlib import asynccontextmanager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db(DB_FILE)
+    log.info("✅ Database initialized")
+    
+    jq: JobQueue = telegram_app.job_queue
+    jq.run_repeating(daily_coupon_job, interval=3600*12, first=10)
+    jq.run_repeating(vip_coupon_job, interval=3600*24, first=20)
+    jq.run_repeating(hourly_live_job, interval=3600, first=30)
+    
+    await telegram_app.initialize()
+    await telegram_app.start()
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+    log.info(f"Webhook set to {WEBHOOK_URL}")
+    log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA Free APIs")
+    
+    yield
+    
+    await telegram_app.bot.delete_webhook()
+    await telegram_app.stop()
+    log.info("Bot stopped")
+
+fastapi_app = FastAPI(lifespan=lifespan)
+telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
+
+telegram_app.add_handler(CommandHandler("test_daily", test_daily))
+telegram_app.add_handler(CommandHandler("test_vip", test_vip))
+telegram_app.add_handler(CommandHandler("test_live", test_live))
+
+@fastapi_app.post(WEBHOOK_PATH)
+async def webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.update_queue.put(update)
+    return {"ok": True}
+
+if __name__ == "__main__":
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=8443)
