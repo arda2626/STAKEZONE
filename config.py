@@ -1,20 +1,22 @@
 # config.py
-import os
+# --- DİKKAT ---
+# "Env olarak yapma" demiştin; bu dosyaya API anahtarlarını koy.
+# Deploy etmeden önce burayı kendi anahtarlarınla güncelle.
 
-# Telegram / TheSportsDB
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or "PUT_YOUR_TELEGRAM_TOKEN_HERE"
-THESPORTSDB_KEY = os.getenv("THESPORTSDB_KEY") or "PUT_YOUR_THESPORTSDB_KEY_HERE"
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", "-1002284350528"))
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"   # -> kendi token'ını buraya yapıştır
+CHANNEL_ID = "@stakedrip"                                         # veya "-100..." channel id
+API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"             # -> kendi API-FOOTBALL key
+THESPORTSDB_KEY = "457761c3fe3072466a8899578fefc5e4"              # optional fallback
+DB_PATH = "data.db"
 
-# Limits & filters
-MIN_ODDS = float(os.getenv("MIN_ODDS", "1.20"))
-MAX_LIVE_PICKS = int(os.getenv("MAX_LIVE_PICKS", "3"))
+# Limits & tuning
+MIN_ODDS = 1.2
+MAX_LIVE_PICKS = 3
+DAILY_INTERVAL_SECONDS = 3600 * 12   # 12 saatte bir günlük kupon
+LIVE_INTERVAL_SECONDS = 3600         # saatlik canlı
+RESULTS_CHECK_SECONDS = 300          # 5 dakika
+WEEKLY_WINDOW_DAYS = 7
+KASA_WINDOW_HOURS = 48
 
-# Schedule settings
-LIVE_INTERVAL_SECONDS = 3600       # hourly
-DAILY_INTERVAL_HOURS = 12         # every 12 hours
-WEEKLY_DAYS = 7
-KASA_HOURS = 48
-
-# DB path
-DB_PATH = os.getenv("DB_PATH", "data.db")
+# Logging
+LOG_LEVEL = "INFO"
