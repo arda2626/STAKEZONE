@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Free v5.20 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Free v5.21 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -34,7 +34,8 @@ def turkey_time(utc_time_str):
     """Her tür tarih formatını Türkiye saatine dönüştürür (UTC+3)."""
     try:
         if not utc_time_str:
-            return "—"
+            # Boşsa varsayılan olarak 1 saat sonrası
+            return datetime.now(timezone(timedelta(hours=3)))
         t_str = utc_time_str.strip().replace(" ", "T")
         if "Z" in t_str:
             dt = datetime.fromisoformat(t_str.replace("Z", "+00:00"))
@@ -46,11 +47,13 @@ def turkey_time(utc_time_str):
         return tr_time
     except Exception as e:
         logging.warning(f"turkey_time error: {e} | value={utc_time_str}")
-        return "—"
+        # Hata durumunda bile datetime döndür
+        return datetime.now(timezone(timedelta(hours=3)))
 
 def format_match_line(match):
     start_time = turkey_time(match.get("date"))
-    start_time_str = start_time.strftime("%d-%m %H:%M") if isinstance(start_time, datetime) else "—"
+    # start_time artık her zaman datetime, güvenli strftime
+    start_time_str = start_time.strftime("%d-%m %H:%M")
     flag_home = league_to_flag(match.get("home_country", ""))
     flag_away = league_to_flag(match.get("away_country", ""))
     emoji_map = {
