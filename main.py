@@ -1,4 +1,4 @@
-# main_webhook.py — STAKEDRIP AI ULTRA Webhook Full Version
+# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.3 ==================
 import asyncio, logging
 from datetime import time as dt_time, timezone
 from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
@@ -16,7 +16,6 @@ from utils import turkey_now
 # ================= CONFIG =================
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
-API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"
 DB_FILE = DB_PATH
 MAX_LIVE_PICKS = 3
 MIN_CONFIDENCE = 0.60
@@ -32,7 +31,7 @@ log = logging.getLogger("stakedrip")
 async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
-        matches = await fetch_all_matches(API_FOOTBALL_KEY) if API_FOOTBALL_KEY else await fetch_all_matches()
+        matches = await fetch_all_matches()
         live = [m for m in matches if m.get("live") or m.get("is_live")]
         chosen = []
         for m in live:
@@ -59,7 +58,7 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
 async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
-        matches = await fetch_all_matches(API_FOOTBALL_KEY) if API_FOOTBALL_KEY else await fetch_all_matches()
+        matches = await fetch_all_matches()
         upcoming = [m for m in matches if not (m.get("live") or m.get("is_live"))]
         picks = []
         for m in upcoming:
@@ -80,7 +79,7 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
-        matches = await fetch_all_matches(API_FOOTBALL_KEY) if API_FOOTBALL_KEY else await fetch_all_matches()
+        matches = await fetch_all_matches()
         picks = []
         for m in matches:
             p = ai_predict(m)
