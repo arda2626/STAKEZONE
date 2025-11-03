@@ -4,8 +4,8 @@ import os
 from datetime import datetime, timezone, timedelta
 
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "<d2e6d7d3d4826877927ded6da40e278e>")
-TSDB_KEY = os.getenv("THESPORTSDB_KEY", "<457761c3fe3072466a8899578fefc5e4>")
-TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{TSDB_KEY}"
+ALLSPORTSAPI_KEY = "27b16a330f4ac79a1f8eb383fec049b9cc0818d5e33645d771e2823db5d80369"
+url = f"https://api.allsportsapi.com/football/live?key={ALLSPORTSAPI_KEY}"
 
 async def fetch_football_matches():
     url = f"https://v3.football.api-sports.io/fixtures?next=50"
