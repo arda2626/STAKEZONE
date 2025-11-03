@@ -1,120 +1,95 @@
-# fetch_matches.py
-# Primary: API-Football (live & upcoming). Fallback: TheSportsDB (limited).
+# ================== fetch_matches.py — STAKEDRIP AI ULTRA v5.1 ==================
 import aiohttp
 import logging
-from datetime import datetime, timezone
-from typing import List, Dict
-from config import API_FOOTBALL_KEY, THESPORTSDB_KEY
-from utils import utcnow
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("stakedrip")
 
-AF_BASE = "https://v3.football.api-sports.io"
-AF_HEADERS = {"x-apisports-key": API_FOOTBALL_KEY} if API_FOOTBALL_KEY else None
-TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}" if THESPORTSDB_KEY else None
+API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 
-async def _fetch_api_football_live() -> List[Dict]:
-    if not API_FOOTBALL_KEY:
-        return []
-    url = AF_BASE + "/fixtures"
-    params = {"live":"all"}
-    async with aiohttp.ClientSession() as s:
-        try:
-            async with s.get(url, headers=AF_HEADERS, params=params, timeout=15) as r:
-                if r.status != 200:
-                    log.debug(f"AF live status {r.status}")
-                    return []
-                data = await r.json()
-                res = data.get("response", [])
-                matches = []
-                for f in res:
-                    fixture = f.get("fixture",{})
-                    teams = f.get("teams",{})
+SPORT_ENDPOINTS = {
+    "football": f"{API_FOOTBALL_BASE}/fixtures?live=all",
+    "basketball": "https://v1.basketball.api-sports.io/games?live=all",
+    "tennis": "https://v1.tennis.api-sports.io/games?live=all"
+}
+
+
+# ============ FETCH CORE ============ #
+async def fetch_api(session, url, api_key, sport):
+    headers = {"x-apisports-key": api_key}
+    async with session.get(url, headers=headers, timeout=15) as r:
+        if r.status != 200:
+            log.warning(f"{sport} fetch failed: {r.status}")
+            return []
+        data = await r.json()
+        if not data or "response" not in data:
+            return []
+        matches = []
+
+        for item in data["response"]:
+            try:
+                if sport == "football":
+                    fixture = item.get("fixture", {})
+                    teams = item.get("teams", {})
+                    league = item.get("league", {})
+
                     matches.append({
                         "id": fixture.get("id"),
-                        "league": f.get("league",{}).get("name"),
-                        "home": teams.get("home",{}).get("name"),
-                        "away": teams.get("away",{}).get("name"),
-                        "sport": "futbol",
+                        "sport": "football",
+                        "league": league.get("name", "Bilinmeyen Lig"),
+                        "country": league.get("country", ""),
+                        "home": teams.get("home", {}).get("name", "?"),
+                        "away": teams.get("away", {}).get("name", "?"),
+                        "minute": fixture.get("status", {}).get("elapsed"),
+                        "odds": 1.5,
                         "live": True,
-                        "minute": fixture.get("status",{}).get("elapsed"),
-                        "start_time": datetime.fromisoformat(fixture.get("date").replace("Z","+00:00")) if fixture.get("date") else utcnow(),
-                        "raw": f
                     })
-                return matches
-        except Exception as e:
-            log.debug(f"_fetch_api_football_live error: {e}")
-            return []
 
-async def _fetch_tsdb_live() -> List[Dict]:
-    if not TSDB_BASE:
-        return []
-    url = f"{TSDB_BASE}/eventslive.php"
-    async with aiohttp.ClientSession() as s:
-        try:
-            async with s.get(url, timeout=12) as r:
-                if r.status != 200:
-                    log.debug("TSDB live status %s", r.status)
-                    return []
-                data = await r.json()
-                events = data.get("event") or []
-                matches = []
-                for e in events:
+                elif sport == "basketball":
+                    game = item.get("game", {})
+                    teams = item.get("teams", {})
+                    league = item.get("league", {})
+
                     matches.append({
-                        "id": e.get("idEvent"),
-                        "league": e.get("strLeague"),
-                        "home": e.get("strHomeTeam"),
-                        "away": e.get("strAwayTeam"),
-                        "sport": (e.get("strSport") or "Soccer").lower(),
+                        "id": game.get("id"),
+                        "sport": "basketball",
+                        "league": league.get("name", "Basketbol Ligi"),
+                        "country": league.get("country", ""),
+                        "home": teams.get("home", {}).get("name", "?"),
+                        "away": teams.get("away", {}).get("name", "?"),
+                        "minute": None,
+                        "odds": 1.6,
                         "live": True,
-                        "minute": e.get("intRound") or e.get("strTime"),
-                        "start_time": utcnow(),
-                        "raw": e
                     })
-                return matches
-        except Exception as e:
-            log.debug(f"_fetch_tsdb_live error: {e}")
-            return []
 
-async def fetch_all_matches(api_key: str = None) -> List[Dict]:
-    """
-    Returns combined list: live matches (football from API-Football preferred, fallback to TSDB),
-    plus a limited set of upcoming football fixtures from API-Football (next 24h) where possible.
-    """
-    matches = []
-    # live football from API-Football
-    try:
-        af = await _fetch_api_football_live()
-        if af:
-            matches.extend(af)
-        else:
-            # fallback
-            ts = await _fetch_tsdb_live()
-            matches.extend(ts)
-    except Exception as e:
-        log.debug(f"fetch_all_matches error: {e}")
-    # upcoming (API-Football next day) - best effort
-    if API_FOOTBALL_KEY:
-        try:
-            async with aiohttp.ClientSession() as s:
-                url = AF_BASE + "/fixtures"
-                params = {"from": datetime.now(timezone.utc).date().isoformat(), "to": (datetime.now(timezone.utc).date()).isoformat(), "next": 50}
-                async with s.get(url, headers=AF_HEADERS, params=params, timeout=15) as r:
-                    if r.status == 200:
-                        data = await r.json()
-                        for f in data.get("response",[]):
-                            fixture = f.get("fixture", {})
-                            teams = f.get("teams", {})
-                            matches.append({
-                                "id": fixture.get("id"),
-                                "league": f.get("league",{}).get("name"),
-                                "home": teams.get("home",{}).get("name"),
-                                "away": teams.get("away",{}).get("name"),
-                                "sport": "futbol",
-                                "live": False,
-                                "start_time": datetime.fromisoformat(fixture.get("date").replace("Z","+00:00")) if fixture.get("date") else utcnow(),
-                                "raw": f
-                            })
-        except Exception as e:
-            log.debug(f"fetch_all_matches upcoming error: {e}")
-    return matches
+                elif sport == "tennis":
+                    tournament = item.get("tournament", {})
+                    event = item.get("event", {})
+                    matches.append({
+                        "id": event.get("id"),
+                        "sport": "tennis",
+                        "league": tournament.get("name", "Tenis Turnuvası"),
+                        "country": tournament.get("country", ""),
+                        "home": event.get("home", "?"),
+                        "away": event.get("away", "?"),
+                        "minute": None,
+                        "odds": 1.7,
+                        "live": True,
+                    })
+
+            except Exception as e:
+                log.warning(f"{sport} parse error: {e}")
+        return matches
+
+
+# ============ MAIN FETCH FUNCTION ============ #
+async def fetch_all_matches(api_key: str):
+    async with aiohttp.ClientSession() as session:
+        all_matches = []
+        for sport, url in SPORT_ENDPOINTS.items():
+            try:
+                matches = await fetch_api(session, url, api_key, sport)
+                all_matches.extend(matches)
+                log.info(f"Fetched {len(matches)} {sport} matches.")
+            except Exception as e:
+                log.error(f"{sport} fetch_all_matches error: {e}")
+        return all_matches
