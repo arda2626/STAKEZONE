@@ -1,78 +1,59 @@
 # fetch_matches.py
 import aiohttp
+from datetime import datetime, timezone
+from utils import utcnow, ensure_min_odds
 import os
-from datetime import datetime, timezone, timedelta
 
-API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "<d2e6d7d3d4826877927ded6da40e278e>")
-ALLSPORTSAPI_KEY = "27b16a330f4ac79a1f8eb383fec049b9cc0818d5e33645d771e2823db5d80369"
-url = f"https://api.allsportsapi.com/football/live?key={ALLSPORTSAPI_KEY}"
+API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"  # Buraya API-Football keyini yaz
+BASE_FOOTBALL_URL = "https://v3.football.api-sports.io"
+
+HEADERS = {
+    "x-apisports-key": API_FOOTBALL_KEY
+}
 
 async def fetch_football_matches():
-    url = f"https://v3.football.api-sports.io/fixtures?next=50"
-    headers = {"x-apisports-key": API_FOOTBALL_KEY}
+    url = f"{BASE_FOOTBALL_URL}/fixtures?live=all"
+    matches = []
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            data = await resp.json()
-            fixtures = data.get("response", [])
-            matches = []
-            for f in fixtures:
-                m = {
-                    "id": f["fixture"]["id"],
-                    "league": f["league"]["name"],
-                    "home": f["teams"]["home"]["name"],
-                    "away": f["teams"]["away"]["name"],
-                    "sport": "futbol",
-                    "live": f["fixture"]["status"]["short"] in ["1H","2H"],
-                    "odds": f.get("odds", {}).get("home_win", 1.2),
-                    "confidence": 0.7,
-                    "start_time": datetime.fromisoformat(f["fixture"]["date"].replace("Z","+00:00"))
-                }
-                matches.append(m)
-            return matches
+        try:
+            async with session.get(url, headers=HEADERS, timeout=10) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                fixtures = data.get("response", [])
+                for f in fixtures:
+                    fixture = f["fixture"]
+                    teams = f["teams"]
+                    league = f["league"]["name"]
+                    home = teams["home"]["name"]
+                    away = teams["away"]["name"]
+                    odds = ensure_min_odds(f.get("odds", {}).get("home_win", 1.2))
+                    matches.append({
+                        "id": fixture["id"],
+                        "league": league,
+                        "home": home,
+                        "away": away,
+                        "sport": "futbol",
+                        "live": fixture["status"]["short"] in ["1H","2H","LIVE"],
+                        "odds": odds,
+                        "confidence": 0.7,
+                        "start_time": datetime.fromisoformat(fixture["date"].replace("Z","+00:00"))
+                    })
+        except Exception as e:
+            print(f"fetch_football_matches error: {e}")
+    return matches
+
+# Basketbol ve tenis API-Football tarafından resmi olarak desteklenmiyor
+# Ancak istersen dummy canlı endpointleri veya başka API kullanabilirsin
+# Aşağıda placeholder olarak bırakıyorum
 
 async def fetch_nba_matches():
-    url = f"{TSDB_BASE}/livescore.php?s=Basketball"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            events = data.get("event", [])
-            matches = []
-            for e in events:
-                m = {
-                    "id": e.get("idEvent"),
-                    "league": e.get("strLeague"),
-                    "home": e.get("strHomeTeam"),
-                    "away": e.get("strAwayTeam"),
-                    "sport": "nba",
-                    "live": True,
-                    "odds": 1.2,
-                    "confidence": 0.7,
-                    "start_time": datetime.utcnow().replace(tzinfo=timezone.utc)
-                }
-                matches.append(m)
-            return matches
+    # placeholder: kendi API veya TSDB kullanabilirsin
+    return []
 
 async def fetch_tennis_matches():
-    url = f"{TSDB_BASE}/livescore.php?s=Tennis"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            events = data.get("event", [])
-            matches = []
-            for e in events:
-                m = {
-                    "id": e.get("idEvent"),
-                    "league": e.get("strLeague"),
-                    "home": e.get("strHomeTeam"),
-                    "away": e.get("strAwayTeam"),
-                    "sport": "tenis",
-                    "live": True,
-                    "odds": 1.2,
-                    "confidence": 0.7,
-                    "start_time": datetime.utcnow().replace(tzinfo=timezone.utc)
-                }
-                matches.append(m)
-            return matches
+    # placeholder: kendi API veya TSDB kullanabilirsin
+    return []
 
 async def fetch_all_matches():
     football = await fetch_football_matches()
