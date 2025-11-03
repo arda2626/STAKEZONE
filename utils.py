@@ -109,7 +109,7 @@ def banner(title: str, matches: list) -> str:
     return "\n".join(lines)
 
 # ================== VERİ TABANI İŞLEMLERİ ==================
-def init_db(path=DB_PATH):
+def init_db(path=None):
     """SQLite veritabanını başlatır."""
     conn = sqlite3.connect("stakedrip.db")
     cur = conn.cursor()
