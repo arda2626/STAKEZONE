@@ -1,4 +1,4 @@
-# fetch_matches_free.py
+# fetch_matches_free.py — Güvenli fetch
 import aiohttp
 import logging
 from datetime import datetime, timezone
@@ -26,10 +26,10 @@ async def fetch_football(session):
                 if match_time:
                     dt = datetime.fromisoformat(match_time.replace("Z", "+00:00"))
                     matches.append({
-                        "id": m["id"],
+                        "id": m.get("id"),
                         "sport": "football",
-                        "home": m["homeTeam"]["name"],
-                        "away": m["awayTeam"]["name"],
+                        "home": m.get("homeTeam", {}).get("name", "Unknown"),
+                        "away": m.get("awayTeam", {}).get("name", "Unknown"),
                         "league": m.get("competition", {}).get("name", "Bilinmeyen Lig"),
                         "country": m.get("competition", {}).get("area", {}).get("name", ""),
                         "odds": 1.5,
@@ -51,19 +51,22 @@ async def fetch_basketball(session):
             data = await r.json()
             matches = []
             for m in data.get("data", []):
-                dt = datetime.fromisoformat(m.get("date") + "Z")
-                matches.append({
-                    "id": m["id"],
-                    "sport": "basketball",
-                    "home": m["home_team"]["full_name"],
-                    "away": m["visitor_team"]["full_name"],
-                    "league": "NBA",
-                    "country": "USA",
-                    "odds": 1.6,
-                    "confidence": 0.5,
-                    "date": dt.isoformat(),
-                    "live": False,
-                })
+                try:
+                    dt = datetime.fromisoformat(m.get("date") + "Z")
+                    matches.append({
+                        "id": m.get("id"),
+                        "sport": "basketball",
+                        "home": m.get("home_team", {}).get("full_name", "Unknown"),
+                        "away": m.get("visitor_team", {}).get("full_name", "Unknown"),
+                        "league": "NBA",
+                        "country": "USA",
+                        "odds": 1.6,
+                        "confidence": 0.5,
+                        "date": dt.isoformat(),
+                        "live": False,
+                    })
+                except Exception as e_inner:
+                    log.warning(f"Skipping basketball match due to parse error: {e_inner}")
             return matches
     except Exception as e:
         log.error(f"basketball fetch exception: {e}")
@@ -78,21 +81,24 @@ async def fetch_tennis(session):
             data = await r.json()
             matches = []
             for m in data.get("response", []):
-                event = m.get("title", "").split(" vs ")
-                if len(event) != 2:
-                    continue
-                matches.append({
-                    "id": m.get("id"),
-                    "sport": "tennis",
-                    "home": event[0],
-                    "away": event[1],
-                    "league": m.get("competition", {}).get("name", "Tenis Turnuvası"),
-                    "country": "",
-                    "odds": 1.7,
-                    "confidence": 0.5,
-                    "date": datetime.now(timezone.utc).isoformat(),
-                    "live": False,
-                })
+                try:
+                    event = m.get("title", "").split(" vs ")
+                    if len(event) != 2:
+                        continue
+                    matches.append({
+                        "id": m.get("id"),
+                        "sport": "tennis",
+                        "home": event[0],
+                        "away": event[1],
+                        "league": m.get("competition", {}).get("name", "Tenis Turnuvası"),
+                        "country": "",
+                        "odds": 1.7,
+                        "confidence": 0.5,
+                        "date": datetime.now(timezone.utc).isoformat(),
+                        "live": False,
+                    })
+                except Exception as e_inner:
+                    log.warning(f"Skipping tennis match due to parse error: {e_inner}")
             return matches
     except Exception as e:
         log.error(f"tennis fetch exception: {e}")
