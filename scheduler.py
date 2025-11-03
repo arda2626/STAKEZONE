@@ -1,96 +1,45 @@
-# scheduler.py
-import aiohttp
+# ================== scheduler.py — STAKEDRIP AI ULTRA v5.0+ ==================
+import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-from utils import utcnow, build_live_text, save_prediction
-from prediction import ai_for_match
+from telegram import Bot
+from fetch_matches import fetch_all_matches
+from prediction import generate_prediction
+from messages import create_live_banner, create_daily_banner, create_vip_banner
 
-# ----------------- LOGGING -----------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(message)s",
-    datefmt="%H:%M:%S"
-)
-log = logging.getLogger(__name__)
+log = logging.getLogger("scheduler")
 
-# ----------------- CONFIG -----------------
-THESPORTSDB_KEY = "YOUR_TSDB_KEY"
-TSDB_BASE = f"https://www.thesportsdb.com/api/v1/json/{THESPORTSDB_KEY}"
-CHANNEL_ID = "@YOUR_CHANNEL"
-MAX_LIVE_PICKS = 3
-MIN_ODDS = 1.2
+async def send_live_predictions(bot, channel, api_key):
+    matches = await fetch_all_matches(api_key)
+    selected = [generate_prediction(m) for m in matches[:3]]
+    if selected:
+        text = create_live_banner(selected)
+        await bot.send_message(channel, text, parse_mode="HTML")
+        log.info(f"Sent {len(selected)} live predictions.")
+    else:
+        log.info("No live matches found this hour.")
 
-# ----------------- FETCH MATCHES -----------------
-async def fetch_live_matches():
-    async with aiohttp.ClientSession() as session:
-        url = f"{TSDB_BASE}/eventslive.php"
+async def send_daily_coupon(bot, channel, api_key):
+    matches = await fetch_all_matches(api_key)
+    picks = [generate_prediction(m) for m in matches[:3]]
+    text = create_daily_banner(picks)
+    await bot.send_message(channel, text, parse_mode="HTML")
+
+async def send_vip_coupon(bot, channel, api_key):
+    matches = await fetch_all_matches(api_key)
+    picks = [generate_prediction(m) for m in matches[:2]]
+    text = create_vip_banner(picks)
+    await bot.send_message(channel, text, parse_mode="HTML")
+
+async def scheduler_main(bot_token, channel_id, api_key):
+    bot = Bot(token=bot_token)
+    while True:
+        now = asyncio.get_event_loop().time()
         try:
-            async with session.get(url, timeout=10) as r:
-                if r.content_type != "application/json":
-                    log.warning(f"Unexpected content type: {r.content_type}")
-                    return []
-                data = await r.json()
-                events = data.get("events", [])
-                matches = []
-                for e in events:
-                    matches.append({
-                        "id": e.get("idEvent"),
-                        "sport": (e.get("strSport") or "soccer").lower(),
-                        "home": e.get("strHomeTeam"),
-                        "away": e.get("strAwayTeam"),
-                        "odds": 1.5,
-                        "confidence": 0.7,
-                        "live": True,
-                        "start_time": utcnow()
-                    })
-                return matches
+            await send_live_predictions(bot, channel_id, api_key)
+            if int(now) % 86400 < 3600:
+                await send_daily_coupon(bot, channel_id, api_key)
+            if int(now) % (7*86400) < 3600:
+                await send_vip_coupon(bot, channel_id, api_key)
         except Exception as e:
-            log.error(f"fetch_live_matches error: {e}")
-            return []
-
-async def fetch_upcoming_matches(hours=48):
-    # Şimdilik live maçları alıyoruz, placeholder olarak
-    live = await fetch_live_matches()
-    upcoming = []  # İsteğe bağlı league-specific ekleme
-    return live + upcoming
-
-# ----------------- SCHEDULER FUNCTIONS -----------------
-async def hourly_live(bot, matches):
-    live_matches = [m for m in matches if m.get("live")][:MAX_LIVE_PICKS]
-    predictions = [ai_for_match(m) for m in live_matches if m.get("odds",0)>=MIN_ODDS]
-    for pred in predictions:
-        text = build_live_text([pred])
-        await bot.send_message(CHANNEL_ID, text)
-    log.info(f"Sent {len(predictions)} hourly live predictions")
-    return predictions
-
-async def daily_coupon(bot, matches):
-    now = utcnow()
-    upcoming = [m for m in matches if m.get("start_time") < now + timedelta(hours=24)]
-    predictions = [ai_for_match(m) for m in upcoming]
-    if predictions:
-        text = "\n".join([f"{p['home']} vs {p['away']} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}" for p in predictions])
-        await bot.send_message(CHANNEL_ID, f"📅 Daily Coupon 📅\n{text}")
-    log.info("Daily coupon sent")
-    return predictions
-
-async def weekly_coupon(bot, matches):
-    now = utcnow()
-    upcoming = [m for m in matches if m.get("start_time") < now + timedelta(days=7)]
-    predictions = [ai_for_match(m) for m in upcoming]
-    if predictions:
-        text = "\n".join([f"{p['home']} vs {p['away']} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}" for p in predictions])
-        await bot.send_message(CHANNEL_ID, f"🗓️ Weekly Coupon 🗓️\n{text}")
-    log.info("Weekly coupon sent")
-    return predictions
-
-async def kasa_coupon(bot, matches):
-    now = utcnow()
-    upcoming = [m for m in matches if m.get("start_time") < now + timedelta(hours=48)]
-    sorted_matches = sorted(upcoming, key=lambda x: x.get("confidence",0), reverse=True)
-    predictions = [ai_for_match(m) for m in sorted_matches[:3]]
-    if predictions:
-        text = "\n".join([f"{p['home']} vs {p['away']} | Odds: {p['odds']} | Confidence: {p['confidence']:.2f}" for p in predictions])
-        await bot.send_message(CHANNEL_ID, f"💰 Kasa Coupon 💰\n{text}")
-    log.info("Kasa coupon sent")
-    return predictions
+            log.error(f"Scheduler error: {e}")
+        await asyncio.sleep(3600)
