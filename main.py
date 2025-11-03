@@ -1,7 +1,7 @@
 # ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.15 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
-from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
 from fastapi import FastAPI, Request
 import uvicorn
@@ -24,22 +24,7 @@ WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
-# ================== EMOJİLER ==================
-EMOJI = {
-    "goal": "⚽",
-    "win": "✅",
-    "lose": "❌",
-    "draw": "🤝",
-    "clock": "🕒",
-    "fire": "🔥",
-    "ai": "🤖",
-    "star": "⭐",
-    "trend": "📈",
-    "earth": "🌍",
-    "light": "💡",
-    "ding": "🔔",
-}
-
+# ================== EMOJI MAP ==================
 EMOJI_MAP = {
     "Over 2.5": "🔥",
     "Under 2.5": "🧊",
@@ -51,7 +36,11 @@ EMOJI_MAP = {
     "Deplasman Kazanır": "✈️✅",
     "Beraberlik": "🤝",
     "KG VAR": "⚽",
-    "Kart 3+": "🟥"
+    "1.5 ÜST": "🔥",
+    "3.5 ÜST": "🔥",
+    "Korner ÜST 8.5": "⚽",
+    "Kart 3+": "🟥",
+    "Tie-break Var": "🎾"
 }
 
 # ================== BAYRAK FONKSİYONU ==================
@@ -59,26 +48,29 @@ def country_to_flag(country_name):
     mapping = {
         "England": "🏴","Germany": "🇩🇪","Spain": "🇪🇸","Italy": "🇮🇹","France": "🇫🇷",
         "Turkey": "🇹🇷","Portugal": "🇵🇹","Netherlands": "🇳🇱","Belgium": "🇧🇪","Brazil": "🇧🇷",
-        "Argentina": "🇦🇷","USA": "🇺🇸","Japan": "🇯🇵","Korea Republic": "🇰🇷"
+        "Argentina": "🇦🇷","USA": "🇺🇸","Japan": "🇯🇵","Korea Republic": "🇰🇷",
+        "Scotland": "🏴","South Korea": "🇰🇷"
     }
     return mapping.get(country_name, "🌍")
 
-# ================== BANNER FONKSİYONLARI ==================
+# ================== FORMAT FONKSİYONU ==================
 def format_match_line(match: dict) -> str:
     home_flag = country_to_flag(match.get("home_country",""))
     away_flag = country_to_flag(match.get("away_country",""))
+
     home = match.get("home","Ev Sahibi")
     away = match.get("away","Deplasman")
     prediction = match.get("bet","Tahmin Yok")
     emoji = EMOJI_MAP.get(prediction, "")
     odds = match.get("odds",1.5)
 
-    # Başlangıç zamanı
+    # Başlangıç zamanı Türkiye saati (UTC+3)
     start_iso = match.get("date") or match.get("start_time")
     if start_iso:
         try:
             start_dt = datetime.fromisoformat(start_iso)
-            start_str = start_dt.strftime("%d-%m %H:%M")
+            tr_dt = start_dt + timedelta(hours=3)  # UTC+3
+            start_str = tr_dt.strftime("%d-%m %H:%M")
         except:
             start_str = "—"
     else:
@@ -92,31 +84,11 @@ def format_match_line(match: dict) -> str:
     ]
     return "\n".join(lines)
 
-def create_daily_banner(matches: list) -> str:
-    if not matches:
-        return f"{EMOJI['ai']} Günlük Kupon\nVeri bulunamadı ⏳"
-    lines = [f"{EMOJI['ai']} Günlük Kupon", "━━━━━━━━━━━━━━━"]
-    for match in matches:
-        lines.append(format_match_line(match))
-        lines.append("")
-    return "\n".join(lines)
-
-def create_vip_banner(matches: list) -> str:
-    if not matches:
-        return f"{EMOJI['fire']} VIP Kupon\nVeri bulunamadı ⏳"
-    lines = [f"{EMOJI['fire']} VIP Kupon", "━━━━━━━━━━━━━━━"]
-    for match in matches:
-        lines.append(format_match_line(match))
-        lines.append("")
-    return "\n".join(lines)
-
-def create_live_banner(matches: list) -> str:
-    if not matches:
-        return f"{EMOJI['trend']} Canlı Maçlar\nVeri bulunamadı ⏳"
-    lines = [f"{EMOJI['trend']} Canlı Maçlar", "━━━━━━━━━━━━━━━"]
-    for match in matches:
-        lines.append(format_match_line(match))
-        lines.append("")
+def create_banner(title: str, matches: list) -> str:
+    lines = [f"🤖 {title}", "━━━━━━━━━━━━━━━"]
+    for m in matches:
+        lines.append(format_match_line(m))
+        lines.append("")  # Boş satır
     return "\n".join(lines)
 
 # ================= JOB FUNCTIONS =================
@@ -135,34 +107,21 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=24, path=DB_FILE):
                 continue
 
-            m.setdefault("home_country", m.get("country",""))
-            m.setdefault("away_country", m.get("country",""))
-
             p = ai_predict(m)
-            if p.get("confidence",0) < 0.6 or p.get("odds",1.5) < 1.2:
-                continue
-            p["home"] = m.get("home")
-            p["away"] = m.get("away")
-            p["odds"] = p.get("odds",1.5)
-            p["date"] = m.get("date")
-            p["home_country"] = m.get("home_country")
-            p["away_country"] = m.get("away_country")
-            picks.append((m["id"],p))
+            if p["confidence"] >= MIN_CONFIDENCE and p["odds"] >= MIN_ODDS:
+                picks.append((m["id"], p))
 
-        chosen = [p for mid,p in picks]
-        chosen = sorted(chosen, key=lambda x: x.get("confidence",0), reverse=True)
-        if chosen:
-            text = create_daily_banner(chosen)
+        if picks:
+            text = create_banner("Günlük Kupon", [p for _,p in picks])
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
-            for mid,_ in picks:
+            for mid, _ in picks:
                 mark_posted(mid, path=DB_FILE)
-            log.info(f"daily_coupon: {len(chosen)} tahmin gönderildi.")
+            log.info(f"daily_coupon: {len(picks)} tahmin gönderildi.")
         else:
             log.info("daily_coupon: uygun maç yok")
     except Exception:
         log.exception("daily_coupon hata:")
 
-# VIP ve LIVE jobları da benzer şekilde güncellendi
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -178,24 +137,14 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=48, path=DB_FILE):
                 continue
 
-            m.setdefault("home_country", m.get("country",""))
-            m.setdefault("away_country", m.get("country",""))
-
             p = ai_predict(m)
-            if p.get("confidence",0) < MIN_CONFIDENCE_VIP or p.get("odds",1.5) < MIN_ODDS:
-                continue
-            p["home"] = m.get("home")
-            p["away"] = m.get("away")
-            p["odds"] = p.get("odds",1.5)
-            p["date"] = m.get("date")
-            p["home_country"] = m.get("home_country")
-            p["away_country"] = m.get("away_country")
-            picks.append((m["id"],p))
+            if p["confidence"] >= MIN_CONFIDENCE_VIP and p["odds"] >= MIN_ODDS:
+                picks.append((m["id"], p))
 
         if picks:
-            text = create_vip_banner([p for mid,p in picks])
+            text = create_banner("VIP Kupon", [p for _,p in picks])
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
-            for mid,_ in picks:
+            for mid, _ in picks:
                 mark_posted(mid, path=DB_FILE)
             log.info("vip_coupon: VIP kupon gönderildi.")
         else:
@@ -211,20 +160,12 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
         picks = []
 
         for m in live_matches:
-            m.setdefault("home_country", m.get("country",""))
-            m.setdefault("away_country", m.get("country",""))
-
             p = ai_predict(m)
-            p["home"] = m.get("home")
-            p["away"] = m.get("away")
-            p["odds"] = p.get("odds",1.5)
-            p["date"] = m.get("date")
-            p["home_country"] = m.get("home_country")
-            p["away_country"] = m.get("away_country")
-            picks.append(p)
+            if p["odds"] >= MIN_ODDS:
+                picks.append(p)
 
         if picks:
-            text = create_live_banner(picks)
+            text = create_banner("Canlı Maçlar", picks)
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             log.info(f"hourly_live: {len(picks)} canlı maç gönderildi.")
         else:
@@ -232,7 +173,7 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("hourly_live hata:")
 
-# ================= ADMIN COMMAND =================
+# ================= ADMIN COMMANDS =================
 async def test_daily(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await daily_coupon_job(context)
     await update.message.reply_text("Test: Günlük kupon çalıştırıldı.")
@@ -258,10 +199,10 @@ async def startup():
     init_db(DB_FILE)
     log.info("✅ Database initialized")
 
-    jq: JobQueue = telegram_app.job_queue
-    jq.run_repeating(daily_coupon_job, interval=3600*12, first=10, name="daily_coupon")
-    jq.run_repeating(vip_coupon_job, interval=3600*24, first=20, name="vip_coupon")
-    jq.run_repeating(hourly_live_job, interval=3600, first=30, name="hourly_live")
+    jq = telegram_app.job_queue
+    jq.run_repeating(daily_coupon_job, interval=3600*12, first=10)
+    jq.run_repeating(vip_coupon_job, interval=3600*24, first=20)
+    jq.run_repeating(hourly_live_job, interval=3600, first=30)
 
     await telegram_app.initialize()
     await telegram_app.start()
