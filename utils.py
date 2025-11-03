@@ -1,86 +1,27 @@
-# ================== utils.py — STAKEDRIP AI ULTRA v5.1 ==================
-import math
+# ================== messages.py — STAKEDRIP AI ULTRA v5.1 ==================
+from utils import format_prediction_line, league_to_flag, EMOJI
 
-# ============ EMOJİLER ============ #
-EMOJI = {
-    "live": "🔴",
-    "cash": "💰",
-    "chart": "📊",
-    "fire": "🔥",
-    "lock": "🔒",
-    "star": "⭐",
-    "vs": "⚡",
-    "clock": "⏱️",
-    "flag": "🏳️",
-}
+# 🔴 Canlı Maç Banner
+def create_live_banner(predictions):
+    banner = f"{EMOJI['fire']} <b>CANLI YAPAY ZEKA TAHMİNLERİ</b> {EMOJI['fire']}\n"
+    banner += "⚽ Basketbol 🏀 Tenis 🎾 dahil tüm dünyadan analiz!\n\n"
+    for p in predictions:
+        banner += format_prediction_line(p) + "\n\n"
+    banner += "📡 Yapay zeka analizleri otomatik olarak güncellenir."
+    return banner
 
-# Lig -> Bayrak Eşleştirmesi
-LEAGUE_FLAGS = {
-    "england": "🏴",
-    "turkey": "🇹🇷",
-    "spain": "🇪🇸",
-    "germany": "🇩🇪",
-    "italy": "🇮🇹",
-    "france": "🇫🇷",
-    "netherlands": "🇳🇱",
-    "portugal": "🇵🇹",
-    "usa": "🇺🇸",
-    "brazil": "🇧🇷",
-    "argentina": "🇦🇷",
-    "belgium": "🇧🇪",
-    "japan": "🇯🇵",
-    "china": "🇨🇳",
-    "russia": "🇷🇺",
-    "greece": "🇬🇷",
-    "scotland": "🏴",
-    "sweden": "🇸🇪",
-    "switzerland": "🇨🇭",
-}
+# 📅 Günlük Kupon Banner
+def create_daily_banner(picks):
+    banner = f"{EMOJI['star']} <b>GÜNLÜK YAPAY ZEKA KUPONU</b> {EMOJI['star']}\n\n"
+    for p in picks:
+        banner += format_prediction_line(p) + "\n\n"
+    banner += "🕓 Günlük analizler her sabah 10:00’da paylaşılır."
+    return banner
 
-# ============ BAYRAK ============ #
-def league_to_flag(league_name: str) -> str:
-    if not league_name:
-        return EMOJI["flag"]
-    name = league_name.lower()
-    for key, flag in LEAGUE_FLAGS.items():
-        if key in name:
-            return flag
-    return EMOJI["flag"]
-
-# ============ ORAN VE FORM ============ #
-def ensure_min_odds(odds: float) -> float:
-    """Minimum oran 1.20 olsun."""
-    try:
-        return round(max(odds, 1.20), 2)
-    except Exception:
-        return 1.20
-
-def calc_form_score(stats: dict) -> float:
-    """Takımın form skorunu 0.0 - 1.0 arası hesapla."""
-    wins = stats.get("wins", 0)
-    draws = stats.get("draws", 0)
-    losses = stats.get("losses", 0)
-    total = wins + draws + losses
-    if total == 0:
-        return 0.5
-    return round((wins + 0.5 * draws) / total, 2)
-
-# ============ GÖRSEL SATIR (Banner) ============ #
-def format_prediction_line(p):
-    """Banner içinde bir tahmin satırı oluşturur."""
-    try:
-        flag = league_to_flag(p.get("league", ""))
-        home = p.get("home", "Ev Sahibi")
-        away = p.get("away", "Deplasman")
-        minute = f"{EMOJI['clock']} {p['minute']}'" if p.get("minute") else ""
-        odds = p.get("odds", 1.5)
-        conf = int(p.get("confidence", 0.7) * 100)
-        pred = p.get("prediction", "Tahmin Yok")
-
-        return (
-            f"{flag} <b>{home}</b> {EMOJI['vs']} <b>{away}</b>\n"
-            f"{minute}  |  💡 Tahmin: <b>{pred}</b>\n"
-            f"🎯 Güven: <b>%{conf}</b>  |  💸 Oran: <b>{odds}</b>"
-        )
-    except Exception as e:
-        return f"⚠️ Tahmin formatlanamadı: {e}"
+# 💰 VIP (Kasa) Kupon Banner
+def create_vip_banner(vip_picks):
+    banner = f"{EMOJI['cash']} <b>VIP / KASA KUPONU</b> {EMOJI['lock']}\n\n"
+    for p in vip_picks:
+        banner += format_prediction_line(p) + "\n\n"
+    banner += "💼 Sadece yüksek güven oranlı (%85+) maçlar içerir."
+    return banner
