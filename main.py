@@ -82,12 +82,13 @@ async def build_coupon(min_conf, title, is_live=False):
     for m in matches:
         if was_posted_recently(m["id"], 24): continue
         p = await ai_predict(m)
+picks.append((p["confidence"], p))   # ← confidence’e göre sırala!
         p["odds"] = await get_live_odds(p, m["sport"])
         if p["confidence"] >= min_conf and p["odds"] >= 1.20:
             picks.append((p["confidence"], p))
     if not picks: return None
 
-    best = max(picks)[1]
+    best = max(picks, key=lambda x: x[0])[1]   # ← EN YÜKSEK GÜVENİ SEÇ!
     mark_posted(best["id"])
     flag_h = league_to_flag(best.get("home_country"))
     flag_a = league_to_flag(best.get("away_country"))
