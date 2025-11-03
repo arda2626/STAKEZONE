@@ -26,15 +26,15 @@ log = logging.getLogger("stakedrip")
 
 # ================= BASİT BANNER FONKSİYONLARI =================
 def create_daily_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
+    lines = [f"{p['home']} vs {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>Günlük Kupon</b>\n" + "\n".join(lines)
 
 def create_vip_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
+    lines = [f"{p['home']} vs {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>VIP Kupon</b>\n" + "\n".join(lines)
 
 def create_live_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('prediction','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
+    lines = [f"{p['home']} vs {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
     return "<b>Canlı Maçlar</b>\n" + "\n".join(lines)
 
 # ================= JOB FUNCTIONS =================
@@ -61,8 +61,8 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             p = ai_predict(m)
             log.info(f"ai_predict({m['home']} vs {m['away']}) -> {p}")  # Tahmin logu
 
-            if "prediction" not in p or not p["prediction"]:
-                p["prediction"] = "Tahmin Yok"
+            if "bet" not in p or not p["bet"]:
+                p["bet"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
@@ -85,7 +85,6 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("daily_coupon hata:")
 
-# VIP ve LIVE joblarını da aynı mantıkla log ekleyebilirsin
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -108,8 +107,8 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             p = ai_predict(m)
             log.info(f"ai_predict VIP({m['home']} vs {m['away']}) -> {p}")
 
-            if "prediction" not in p or not p["prediction"]:
-                p["prediction"] = "Tahmin Yok"
+            if "bet" not in p or not p["bet"]:
+                p["bet"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds", 1.5))
@@ -129,7 +128,6 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("vip_coupon hata:")
 
-# Canlı maç job
 async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -145,8 +143,8 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
             p = ai_predict(m)
             log.info(f"ai_predict LIVE({m['home']} vs {m['away']}) -> {p}")
 
-            if "prediction" not in p or not p["prediction"]:
-                p["prediction"] = "Tahmin Yok"
+            if "bet" not in p or not p["bet"]:
+                p["bet"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds",1.5))
