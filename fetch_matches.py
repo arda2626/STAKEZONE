@@ -1,13 +1,15 @@
-# ================== fetch_matches.py — STAKEDRIP AI ULTRA v5.3 ==================
+# ================== fetch_matches.py — STAKEDRIP AI ULTRA v5.4 ==================
 import aiohttp
 import logging
 
 log = logging.getLogger("stakedrip")
 
+# ================== API KEYS ==================
 API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
-THE_ODDS_API_KEY = "457761c3fe3072466a8899578fefc5e4"
-THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports/soccer_epl/odds"
+
+THE_ODDS_API_KEY = "41eb74e295dfecf0a675417cbb56cf4d"
+THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports/soccer/odds"
 
 SPORT_ENDPOINTS = {
     "football": f"{API_FOOTBALL_BASE}/fixtures?live=all",
@@ -15,8 +17,7 @@ SPORT_ENDPOINTS = {
     "tennis": "https://v1.tennis.api-sports.io/games?live=all"
 }
 
-
-# ============ FETCH CORE ============ #
+# ================== FETCH CORE ==================
 async def fetch_api(session, url, api_key, sport):
     headers = {"x-apisports-key": api_key} if sport != "theodds" else {}
     try:
@@ -29,7 +30,8 @@ async def fetch_api(session, url, api_key, sport):
                 return []
 
             matches = []
-            for item in data.get("response", data):  # The Odds API response farklı
+            # The Odds API response farklı yapıda geliyor
+            for item in data.get("response", data):
                 try:
                     if sport == "football":
                         fixture = item.get("fixture", {})
@@ -75,12 +77,12 @@ async def fetch_api(session, url, api_key, sport):
                             "odds": 1.7,
                             "live": True,
                         })
-                    elif sport == "theodds":  # The Odds API fallback
+                    elif sport == "theodds":
                         matches.append({
                             "id": item.get("id"),
                             "sport": "football",
                             "league": item.get("league", "Bilinmeyen Lig"),
-                            "country": item.get("country", ""),
+                            "country": item.get("home_team_country", ""),
                             "home": item.get("home_team", "?"),
                             "away": item.get("away_team", "?"),
                             "minute": None,
@@ -94,8 +96,7 @@ async def fetch_api(session, url, api_key, sport):
         log.error(f"{sport} fetch_api exception: {e}")
         return []
 
-
-# ============ MAIN FETCH FUNCTION ============ #
+# ================== MAIN FETCH FUNCTION ==================
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
         all_matches = []
@@ -108,10 +109,10 @@ async def fetch_all_matches():
             log.error(f"football fetch_all_matches error: {e}")
             football_matches = []
 
-        # Eğer boşsa The Odds API'den çek
+        # Eğer boşsa The Odds API'den çek (tüm ülkeler, tüm ligler)
         if not football_matches:
             try:
-                url = f"{THE_ODDS_API_BASE}?apiKey={THE_ODDS_API_KEY}"
+                url = f"{THE_ODDS_API_BASE}?apiKey={THE_ODDS_API_KEY}&regions=all&markets=h2h,totals,spreads"
                 football_matches = await fetch_api(session, url, THE_ODDS_API_KEY, "theodds")
                 log.info(f"Fetched {len(football_matches)} football matches from The Odds API (fallback).")
             except Exception as e:
