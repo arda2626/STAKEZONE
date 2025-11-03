@@ -1,7 +1,6 @@
-# ================== utils.py — STAKEDRIP AI ULTRA v5.1 ==================
+# ================== utils.py — STAKEDRIP AI ULTRA v5.2 ==================
 import random
-import math
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ================== EMOJİ VE SİMGELER ==================
 EMOJI = {
@@ -63,22 +62,24 @@ def league_to_flag(country_name: str) -> str:
     """Ülke adına göre bayrak döndürür."""
     return LEAGUE_FLAGS.get(country_name, "🌍")
 
+# ================== ZAMAN ==================
+def utcnow():
+    """UTC zamanını döndürür."""
+    return datetime.now(timezone.utc)
+
 # ================== ORAN VE FORM HESAPLAMALARI ==================
 def ensure_min_odds(odds: float, minimum: float = 1.40) -> float:
     """Oran çok düşükse minimum değere yuvarla."""
     return max(odds, minimum)
 
 def calc_form_score(form_string: str) -> float:
-    """
-    Takım formunu puanlar (W=1, D=0.5, L=0)
-    Örnek: "WWDLW" -> 3.5
-    """
+    """Takım formunu puanlar (W=1, D=0.5, L=0)."""
     if not form_string:
         return 0
     form = form_string.upper()
     return form.count("W") + 0.5 * form.count("D")
 
-# ================== YÜZDE VE GÜVEN SKORU ==================
+# ================== GÜVEN SEVİYESİ ==================
 def confidence_score(probability: float) -> str:
     """AI tahmini güven seviyesini Türkçe olarak döndürür."""
     if probability >= 0.85:
@@ -92,11 +93,7 @@ def confidence_score(probability: float) -> str:
 
 # ================== BANNER YARDIMCISI ==================
 def format_prediction_line(match):
-    """
-    Maç verilerini banner'a uygun biçimde düzenler.
-    Örnek:
-    🇹🇷 23' | Galatasaray vs Fenerbahçe | 🔥 2.5 ÜST | Güven: Yüksek Güven 💪
-    """
+    """Maç verilerini banner'a uygun biçimde düzenler."""
     flag = league_to_flag(match.get("country", ""))
     minute = f"{EMOJI['clock']} {match.get('minute', '—')}'"
     prediction = match.get("prediction", "—")
@@ -107,7 +104,7 @@ def format_prediction_line(match):
 
     return f"{flag} {minute} | {home} vs {away} | {emoji} {prediction} | {confidence}"
 
-# ================== GENEL FONKSİYONLAR ==================
+# ================== GENEL BANNER ==================
 def banner(title: str, matches: list) -> str:
     """Maç listesini üst başlıkla banner haline getirir."""
     if not matches:
@@ -118,6 +115,7 @@ def banner(title: str, matches: list) -> str:
         lines.append(format_prediction_line(m))
     return "\n".join(lines)
 
+# ================== RASTGELE AI MESAJI ==================
 def random_ai_message() -> str:
     """AI tarafından rastgele mesaj üretir."""
     phrases = [
