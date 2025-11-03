@@ -1,4 +1,4 @@
-# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.4 ==================
+# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.5 ==================
 import asyncio, logging
 from datetime import time as dt_time, timezone
 from telegram.ext import Application, JobQueue, ContextTypes
@@ -104,36 +104,32 @@ async def results_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("results_job hata:")
 
-# ================= FASTAPI + TELEGRAM WITH LIFESPAN =================
+# ================= FASTAPI + TELEGRAM =================
 fastapi_app = FastAPI()
+telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-async def lifespan(app: FastAPI):
-    telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
+@fastapi_app.on_event("startup")
+async def startup():
     init_db(DB_FILE)
     log.info("✅ Database initialized")
-
-    # Job queue
+    
     jq: JobQueue = telegram_app.job_queue
     jq.run_repeating(hourly_live_job, interval=3600, first=10, name="hourly_live")
     jq.run_repeating(daily_coupon_job, interval=3600*12, first=60, name="daily_coupon")
     jq.run_repeating(vip_coupon_job, interval=86400, first=120, name="vip_coupon")
     jq.run_daily(results_job, time=dt_time(hour=20, minute=0, tzinfo=timezone.utc), name="results_check")
-
-    # Telegram başlat
+    
     await telegram_app.initialize()
     await telegram_app.start()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
     log.info(f"Webhook set to {WEBHOOK_URL}")
     log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA")
 
-    yield  # lifespan boyunca uygulama çalışacak
-
-    # Shutdown
+@fastapi_app.on_event("shutdown")
+async def shutdown():
     await telegram_app.bot.delete_webhook()
     await telegram_app.stop()
     log.info("Bot stopped")
-
-fastapi_app.router.lifespan_context = lifespan
 
 @fastapi_app.post(WEBHOOK_PATH)
 async def webhook(req: Request):
@@ -142,6 +138,5 @@ async def webhook(req: Request):
     await telegram_app.update_queue.put(update)
     return {"ok": True}
 
-# ================= START FASTAPI =================
 if __name__ == "__main__":
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8443)
