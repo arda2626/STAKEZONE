@@ -1,7 +1,7 @@
-# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.3 ==================
+# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.4 ==================
 import asyncio, logging
 from datetime import time as dt_time, timezone
-from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
+from telegram.ext import Application, JobQueue, ContextTypes
 from telegram import Update
 from fastapi import FastAPI, Request
 import uvicorn
@@ -11,7 +11,6 @@ from fetch_matches import fetch_all_matches
 from prediction import ai_predict
 from messages import create_live_banner, create_daily_banner, create_vip_banner
 from results import check_results
-from utils import turkey_now
 
 # ================= CONFIG =================
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
@@ -52,7 +51,7 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
             log.info(f"hourly_live: {len(chosen)} tahmin gönderildi.")
         else:
             log.info("hourly_live: uygun tahmin yok")
-    except Exception as e:
+    except Exception:
         log.exception("hourly_live hata:")
 
 async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
@@ -73,7 +72,7 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             text = create_daily_banner(chosen)
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             log.info("daily_coupon: gönderildi")
-    except Exception as e:
+    except Exception:
         log.exception("daily_coupon hata:")
 
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
@@ -93,33 +92,33 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             text = create_vip_banner(vip)
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             log.info("vip_coupon: gönderildi")
-    except Exception as e:
+    except Exception:
         log.exception("vip_coupon hata:")
 
 async def results_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
-        try:
-            await check_results(bot)
-        except TypeError:
-            pass
-    except Exception as e:
+        await check_results(bot)
+    except TypeError:
+        pass
+    except Exception:
         log.exception("results_job hata:")
 
-# ================= FASTAPI + TELEGRAM =================
+# ================= FASTAPI + TELEGRAM WITH LIFESPAN =================
 fastapi_app = FastAPI()
-telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 
-@fastapi_app.on_event("startup")
-async def startup():
+async def lifespan(app: FastAPI):
+    telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
     init_db(DB_FILE)
     log.info("✅ Database initialized")
-    # Job queue ekle
+
+    # Job queue
     jq: JobQueue = telegram_app.job_queue
     jq.run_repeating(hourly_live_job, interval=3600, first=10, name="hourly_live")
     jq.run_repeating(daily_coupon_job, interval=3600*12, first=60, name="daily_coupon")
     jq.run_repeating(vip_coupon_job, interval=86400, first=120, name="vip_coupon")
     jq.run_daily(results_job, time=dt_time(hour=20, minute=0, tzinfo=timezone.utc), name="results_check")
+
     # Telegram başlat
     await telegram_app.initialize()
     await telegram_app.start()
@@ -127,11 +126,14 @@ async def startup():
     log.info(f"Webhook set to {WEBHOOK_URL}")
     log.info("BOT 7/24 ÇALIŞIYOR – STAKEDRIP AI ULTRA")
 
-@fastapi_app.on_event("shutdown")
-async def shutdown():
+    yield  # lifespan boyunca uygulama çalışacak
+
+    # Shutdown
     await telegram_app.bot.delete_webhook()
     await telegram_app.stop()
     log.info("Bot stopped")
+
+fastapi_app.router.lifespan_context = lifespan
 
 @fastapi_app.post(WEBHOOK_PATH)
 async def webhook(req: Request):
