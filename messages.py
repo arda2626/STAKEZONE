@@ -1,11 +1,12 @@
-from utils import banner as util_banner, league_to_flag, EMOJI
+# ================== messages.py — STAKEDRIP AI ULTRA v5.10 ==================
+from utils import banner as util_banner, league_to_flag
 from html import escape
 from datetime import datetime, timezone, timedelta
 
 # ================== TÜRKİYE SAATİ ==================
 def current_time_tr():
     tr_tz = timezone(timedelta(hours=3))
-    return datetime.now(tr_tz).strftime("%d %B %H:%M")
+    return datetime.now(tr_tz).strftime("%d %B %H:%M")  # Örn: 03 Kasım 22:57
 
 # ================== CANLI MAÇ BANNER ==================
 def create_live_banner(predictions):
@@ -32,7 +33,6 @@ def create_live_banner(predictions):
     lines.append(f"\n🔔 Minimum oran: 1.20 • Maksimum 3 maç")
     return "\n".join(lines)
 
-
 # ================== GÜNLÜK KUPON BANNER ==================
 def create_daily_banner(predictions):
     update_time = current_time_tr()
@@ -48,14 +48,20 @@ def create_daily_banner(predictions):
         odds = p.get("odds", 1.5)
         total *= odds
 
+        # Maç tarihini TR saatine çevir
+        try:
+            match_dt = datetime.fromisoformat(p.get("date")).astimezone(timezone(timedelta(hours=3)))
+            match_date = match_dt.strftime("%d %b %H:%M")
+        except:
+            match_date = "Tarih Yok"
+
         lines.append(f"⚽️ {i}. {home} vs {away} {flag}")
-        lines.append(f"🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
+        lines.append(f"🗓️ Tarih: {match_date} • 🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
         lines.append("🌟" * 15)
 
     lines.append(f"💵 Toplam Oran: <b>{round(total,2)}</b>")
     lines.append(f"🕒 Güncelleme: {update_time}")
     return "\n".join(lines)
-
 
 # ================== VIP KASA BANNER ==================
 def create_vip_banner(predictions):
@@ -72,8 +78,15 @@ def create_vip_banner(predictions):
         odds = p.get("odds", 1.5)
         total *= odds
 
+        # Maç tarihini TR saatine çevir
+        try:
+            match_dt = datetime.fromisoformat(p.get("date")).astimezone(timezone(timedelta(hours=3)))
+            match_date = match_dt.strftime("%d %b %H:%M")
+        except:
+            match_date = "Tarih Yok"
+
         lines.append(f"🏆 {i}. {home} vs {away} {flag}")
-        lines.append(f"🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
+        lines.append(f"🗓️ Tarih: {match_date} • 🎯 Tahmin: <b>{bet}</b> • 💰 Oran: <b>{odds}</b>")
         lines.append("💠" * 15)
 
     lines.append(f"💰 Potansiyel Kazanç: <b>{round(total,2)}</b>")
