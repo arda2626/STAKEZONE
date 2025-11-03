@@ -1,5 +1,6 @@
-# ================== utils.py — STAKEDRIP AI ULTRA v5.3 ==================
+# ================== utils.py — STAKEDRIP AI ULTRA v5.4 ==================
 import random
+import sqlite3
 from datetime import datetime, timezone, timedelta
 
 # ================== EMOJİLER ==================
@@ -107,33 +108,65 @@ def banner(title: str, matches: list) -> str:
         lines.append(format_prediction_line(m))
     return "\n".join(lines)
 
-# ================== VERİ TABANI DESTEK FONKSİYONLARI ==================
-# Bu fonksiyonlar results.py ile uyumludur.
+# ================== VERİ TABANI İŞLEMLERİ ==================
+def init_db():
+    """SQLite veritabanını başlatır."""
+    conn = sqlite3.connect("stakedrip.db")
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            home TEXT,
+            away TEXT,
+            prediction TEXT,
+            confidence REAL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+    print("✅ Database initialized: stakedrip.db")
+
 def mark_prediction(prediction_id: str, status: str):
-    """Veritabanında tahmini kazandı/kaybetti olarak işaretler."""
+    """Tahmini kazandı/kaybetti olarak işaretler."""
+    conn = sqlite3.connect("stakedrip.db")
+    cur = conn.cursor()
+    cur.execute("UPDATE predictions SET status=? WHERE id=?", (status, prediction_id))
+    conn.commit()
+    conn.close()
     print(f"[DB] Tahmin #{prediction_id} sonucu güncellendi: {status}")
 
 def get_pending_predictions():
-    """Henüz sonuçlanmamış tahminleri döndürür (örnek veridir)."""
-    return [
-        {"id": 1, "home": "Galatasaray", "away": "Fenerbahçe", "prediction": "Over 2.5", "confidence": 0.81},
-        {"id": 2, "home": "Real Madrid", "away": "Barcelona", "prediction": "BTTS", "confidence": 0.76},
-    ]
+    """Henüz sonuçlanmamış tahminleri döndürür."""
+    conn = sqlite3.connect("stakedrip.db")
+    cur = conn.cursor()
+    cur.execute("SELECT id, home, away, prediction, confidence FROM predictions WHERE status='pending'")
+    rows = cur.fetchall()
+    conn.close()
+    result = [{"id": r[0], "home": r[1], "away": r[2], "prediction": r[3], "confidence": r[4]} for r in rows]
+    return result
 
 def day_summary_between(start_date: datetime, end_date: datetime):
-    """Belirli bir tarih aralığındaki kazanç/başarı oranını döndürür."""
-    fake_data = {"won": 7, "lost": 3}
-    total = fake_data["won"] + fake_data["lost"]
-    success_rate = (fake_data["won"] / total) * 100 if total else 0
-    return f"📅 {start_date.date()} - {end_date.date()} Arası Başarı Oranı: %{success_rate:.1f}"
+    """Belirli bir tarih aralığındaki başarı oranını döndürür."""
+    conn = sqlite3.connect("stakedrip.db")
+    cur = conn.cursor()
+    cur.execute("SELECT status, COUNT(*) FROM predictions WHERE DATE(created_at) BETWEEN ? AND ? GROUP BY status",
+                (start_date.date(), end_date.date()))
+    stats = {row[0]: row[1] for row in cur.fetchall()}
+    conn.close()
+    won, lost = stats.get("won", 0), stats.get("lost", 0)
+    total = won + lost
+    success_rate = (won / total) * 100 if total else 0
+    return f"📅 {start_date.date()} - {end_date.date()} Başarı Oranı: %{success_rate:.1f}"
 
 # ================== RASTGELE AI MESAJI ==================
 def random_ai_message() -> str:
     phrases = [
         "Veriler analiz ediliyor...",
-        "Yapay zeka modeli güncelleniyor 🤖",
-        "Yeni istatistikler taranıyor 📊",
-        "Tahmin motoru çalışıyor ⚙️",
+        "Yapay zeka tahmin motoru aktif 🤖",
         "Maç verileri değerlendiriliyor 🔍",
+        "Yeni istatistikler işleniyor 📊",
+        "Son form ve oranlar inceleniyor ⚙️",
     ]
     return random.choice(phrases)
