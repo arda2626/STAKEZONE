@@ -81,7 +81,7 @@ async def build_coupon(min_conf, title, is_live=False):
     picks = []
     for m in matches:
         if was_posted_recently(m["id"], 24): continue
-        p = ai_predict(m)
+        p = await ai_predict(m)
         p["odds"] = await get_live_odds(p, m["sport"])
         if p["confidence"] >= min_conf and p["odds"] >= 1.20:
             picks.append((p["confidence"], p))
