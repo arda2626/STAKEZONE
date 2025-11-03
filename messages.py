@@ -1,67 +1,37 @@
-# ================== messages.py — STAKEDRIP AI ULTRA v5.0+ ==================
-import random
-
-SPORT_EMOJIS = {
-    "football": "⚽️",
-    "basketball": "🏀",
-    "tennis": "🎾"
-}
+# messages.py
+from utils import banner as util_banner, league_to_flag, EMOJI, EMOJI_MAP
+from html import escape
 
 def create_live_banner(predictions):
-    header = (
-        "🔥🔥🔥 <b>STAKEDRIP AI CANLI TAHMİNLER</b> 🔥🔥🔥\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "⏱️ <i>Gerçek zamanlı verilerden üretilmiştir</i>\n\n"
-    )
-    lines = []
+    # HTML compatible banner (we'll use parse_mode="HTML")
+    head = util_banner("LIVE")
+    lines = [f"<pre>{escape(head)}</pre>", ""]
+    for i,p in enumerate(predictions,1):
+        flag = league_to_flag(p.get("league"))
+        minute = p.get("minute", "")
+        lines.append(f"<b>{i}. {escape(p.get('home','-'))} vs {escape(p.get('away','-'))}</b>")
+        lines.append(f"{flag} {escape(p.get('league',''))} {escape(str(minute))}")
+        lines.append(f"Tahmin: <b>{escape(str(p.get('bet')))}</b> • Oran: <b>{p.get('odds')}</b> • AI: %{int(p.get('confidence',0)*100)}")
+        lines.append("<i>—</i>")
+    lines.append(f"{EMOJI.get('ding','🔔')} Minimum oran: 1.20 • Maks: 3 maç")
+    return "\n".join(lines)
+
+def create_daily_banner(predictions):
+    head = util_banner("GÜNLÜK")
+    total = 1.0
+    lines = [f"<pre>{escape(head)}</pre>", ""]
     for p in predictions:
-        emoji = SPORT_EMOJIS.get(p["sport"], "🎯")
-        bar = "⚡" * int(p["confidence"] * 10)
-        lines.append(
-            f"{emoji} <b>{p['home']}</b> vs <b>{p['away']}</b>\n"
-            f"🏆 {p['league']}\n"
-            f"📊 Tahmin: <b>{p['prediction']}</b>\n"
-            f"💰 Oran: {p.get('odds', 1.0)}\n"
-            f"⚡ Güven: {int(p['confidence']*100)}% {bar}\n"
-            f"⏱️ Dakika: {p.get('minute', '-')}' | Skor: {p.get('score', '-')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-    footer = "\n🔥 <i>STAKEDRIP AI — canlı verilerle anlık kazanç</i> 🔥"
-    return header + "\n".join(lines) + "\n" + footer
+        lines.append(f"{escape(p.get('home','-'))} vs {escape(p.get('away','-'))} • {escape(str(p.get('bet')))} @ <b>{p.get('odds')}</b>")
+        total *= p.get('odds',1.0)
+    lines.append(f"<b>TOPLAM ORAN: {round(total,2)}</b>")
+    return "\n".join(lines)
 
-
-def create_daily_banner(picks):
-    header = (
-        "📅 <b>GÜNLÜK STAKEDRIP AI KUPONU</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-    )
-    lines = []
-    for p in picks:
-        emoji = SPORT_EMOJIS.get(p["sport"], "🎯")
-        lines.append(
-            f"{emoji} {p['home']} vs {p['away']}\n"
-            f"💡 Tahmin: <b>{p['prediction']}</b>\n"
-            f"💰 Oran: {p.get('odds', 1.0)} | ⚡ {int(p['confidence']*100)}%\n"
-            "━━━━━━━━━━━━━━━"
-        )
-    footer = "\n💎 <i>AI tarafından seçilen en güvenli 3 maç</i>"
-    return header + "\n".join(lines) + footer
-
-
-def create_vip_banner(picks):
-    header = (
-        "💎💎💎 <b>VIP KASA KUPONU</b> 💎💎💎\n"
-        "🔥 <i>AI güven oranı: %90+</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-    )
-    lines = []
-    for p in picks:
-        emoji = SPORT_EMOJIS.get(p["sport"], "🎯")
-        lines.append(
-            f"{emoji} <b>{p['home']}</b> - <b>{p['away']}</b>\n"
-            f"💡 <b>{p['prediction']}</b> | 💰 {p.get('odds', 1.0)} | ⚡ {int(p['confidence']*100)}%\n"
-            f"🏆 {p['league']}\n"
-            "━━━━━━━━━━━━━━━"
-        )
-    footer = "\n🚀 <i>STAKEDRIP VIP — kasa odaklı yüksek güvenli kombin</i>"
-    return header + "\n".join(lines) + footer
+def create_vip_banner(predictions):
+    head = util_banner("KASA")
+    total = 1.0
+    lines = [f"<pre>{escape(head)}</pre>", ""]
+    for p in predictions:
+        lines.append(f"{escape(p.get('home','-'))} vs {escape(p.get('away','-'))} • {escape(str(p.get('bet')))} @ <b>{p.get('odds')}</b>")
+        total *= p.get('odds',1.0)
+    lines.append(f"<b>POTANSİYEL: {round(total,2)}</b>")
+    return "\n".join(lines)
