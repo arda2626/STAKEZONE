@@ -1,128 +1,114 @@
+# ================== fetch_matches_free.py — STAKEDRIP AI ULTRA v5.6 ==================
 import aiohttp
 import logging
+from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger("stakedrip")
 
 # ================== API KEYS ==================
-API_FOOTBALL_KEY = "5654d778e6092b57eea0f2c640addeb6"
-API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
-
-THE_ODDS_API_KEY = "41eb74e295dfecf0a675417cbb56cf4d"
-THE_ODDS_API_BASE = "https://api.the-odds-api.com/v4/sports"
-
-SPORTSDATAIO_BASKETBALL_KEY = "32524949c0784f19a8a19c5d5f90e5d2"
-SPORTSDATAIO_BASKETBALL_BASE = "https://api.sportsdata.io/v3/nba/scores/json"
-
-SPORT_ENDPOINTS = {
-    "football": f"{API_FOOTBALL_BASE}/fixtures?live=all",
-    "basketball": f"{SPORTSDATAIO_BASKETBALL_BASE}/GamesByDate/{{date}}",
-    "tennis": "https://v1.tennis.api-sports.io/games?live=all"
-}
+API_FOOTBALL_KEY = "70b1ee7a9db547649988d3898503771d"  # Football-Data.org
+BASKETBALL_BASE = "https://www.balldontlie.io/api/v1/games"  # Ücretsiz NBA
+# Tenis için örnek ücretsiz kaynak: https://www.scorebat.com/video-api/v3/
 
 # ================== FETCH CORE ==================
-async def fetch_api(session, url, api_key, sport, headers_extra=None):
-    headers = headers_extra or {}
-    if sport != "theodds":
-        headers.update({"Ocp-Apim-Subscription-Key": api_key})
+async def fetch_football(session):
+    url = "https://api.football-data.org/v4/matches?status=SCHEDULED"
+    headers = {"X-Auth-Token": API_FOOTBALL_KEY}
+    matches = []
     try:
         async with session.get(url, headers=headers, timeout=15) as r:
             if r.status != 200:
-                log.warning(f"{sport} fetch failed: {r.status}")
+                log.warning(f"football fetch failed: {r.status}")
                 return []
             data = await r.json()
-            if not data:
-                return []
-
-            matches = []
-            for item in data.get("response", data):
-                try:
-                    if sport == "football":
-                        fixture = item.get("fixture", {})
-                        teams = item.get("teams", {})
-                        league = item.get("league", {})
-                        matches.append({
-                            "id": fixture.get("id"),
-                            "sport": "football",
-                            "league": league.get("name", "Bilinmeyen Lig"),
-                            "country": league.get("country", ""),
-                            "home": teams.get("home", {}).get("name", "?"),
-                            "away": teams.get("away", {}).get("name", "?"),
-                            "minute": fixture.get("status", {}).get("elapsed"),
-                            "odds": 1.5,
-                            "live": True,
-                        })
-                    elif sport == "basketball":
-                        matches.append({
-                            "id": item.get("GameID"),
-                            "sport": "basketball",
-                            "league": "NBA",
-                            "country": "USA",
-                            "home": item.get("HomeTeam", "?"),
-                            "away": item.get("AwayTeam", "?"),
-                            "minute": None,
-                            "odds": 1.6,
-                            "live": item.get("Status") == "InProgress",
-                        })
-                    elif sport == "tennis":
-                        tournament = item.get("tournament", {})
-                        event = item.get("event", {})
-                        matches.append({
-                            "id": event.get("id"),
-                            "sport": "tennis",
-                            "league": tournament.get("name", "Tenis Turnuvası"),
-                            "country": tournament.get("country", ""),
-                            "home": event.get("home", "?"),
-                            "away": event.get("away", "?"),
-                            "minute": None,
-                            "odds": 1.7,
-                            "live": True,
-                        })
-                    elif sport == "theodds":
-                        matches.append({
-                            "id": item.get("id"),
-                            "sport": "football",
-                            "league": item.get("league", "Bilinmeyen Lig"),
-                            "country": item.get("home_team_country", ""),
-                            "home": item.get("home_team", "?"),
-                            "away": item.get("away_team", "?"),
-                            "minute": None,
-                            "odds": 1.5,
-                            "live": True,
-                        })
-                except Exception as e:
-                    log.warning(f"{sport} parse error: {e}")
-            return matches
+            for m in data.get("matches", []):
+                match_time = datetime.fromisoformat(m["utcDate"].replace("Z","+00:00"))
+                # Sadece 24 saat içindeki maçlar
+                if match_time <= datetime.now(timezone.utc) + timedelta(hours=24):
+                    matches.append({
+                        "id": m["id"],
+                        "sport": "football",
+                        "league": m["competition"]["name"],
+                        "home": m["homeTeam"]["name"],
+                        "away": m["awayTeam"]["name"],
+                        "date": match_time.isoformat(),
+                        "odds": 1.5,
+                        "live": False
+                    })
+        log.info(f"Fetched {len(matches)} football matches from Football-Data.org.")
+        return matches
     except Exception as e:
-        log.error(f"{sport} fetch_api exception: {e}")
+        log.error(f"football fetch_api exception: {e}")
+        return []
+
+async def fetch_basketball(session):
+    # Sadece bugün ve yarınki maçları çekelim
+    start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    end = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    url = f"{BASKETBALL_BASE}?start_date={start}&end_date={end}"
+    matches = []
+    try:
+        async with session.get(url, timeout=15) as r:
+            if r.status != 200:
+                log.warning(f"basketball fetch failed: {r.status}")
+                return []
+            data = await r.json()
+            for m in data.get("data", []):
+                matches.append({
+                    "id": m["id"],
+                    "sport": "basketball",
+                    "league": "NBA",
+                    "home": m["home_team"]["full_name"],
+                    "away": m["visitor_team"]["full_name"],
+                    "date": m["date"],
+                    "odds": 1.6,
+                    "live": False
+                })
+        log.info(f"Fetched {len(matches)} basketball matches from balldontlie.io.")
+        return matches
+    except Exception as e:
+        log.error(f"basketball fetch_api exception: {e}")
+        return []
+
+async def fetch_tennis(session):
+    # Tenis için Scorebat video API ücretsiz
+    url = "https://www.scorebat.com/video-api/v3/feed/"
+    matches = []
+    try:
+        async with session.get(url, timeout=15) as r:
+            if r.status != 200:
+                log.warning(f"tennis fetch failed: {r.status}")
+                return []
+            data = await r.json()
+            for m in data.get("response", []):
+                if "tennis" in m.get("competition", "").lower():
+                    matches.append({
+                        "id": m.get("id"),
+                        "sport": "tennis",
+                        "league": m.get("competition"),
+                        "home": m.get("title", "?").split(" vs ")[0],
+                        "away": m.get("title", "?").split(" vs ")[-1],
+                        "date": m.get("date"),
+                        "odds": 1.7,
+                        "live": False
+                    })
+        log.info(f"Fetched {len(matches)} tennis matches from Scorebat API.")
+        return matches
+    except Exception as e:
+        log.error(f"tennis fetch_api exception: {e}")
         return []
 
 # ================== MAIN FETCH FUNCTION ==================
-from datetime import datetime
-
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
         all_matches = []
-
-        # 1️⃣ Futbol
-        football_matches = await fetch_api(session, SPORT_ENDPOINTS["football"], API_FOOTBALL_KEY, "football")
-        log.info(f"Fetched {len(football_matches)} football matches from API-Football.")
-
-        if not football_matches:
-            url = f"{THE_ODDS_API_BASE}/soccer/odds/?apiKey={THE_ODDS_API_KEY}&regions=all&markets=h2h,totals,spreads"
-            football_matches = await fetch_api(session, url, THE_ODDS_API_KEY, "theodds")
-            log.info(f"Fetched {len(football_matches)} football matches from The Odds API (fallback).")
+        football_matches = await fetch_football(session)
         all_matches.extend(football_matches)
 
-        # 2️⃣ Basketbol (SportsDataIO)
-        today = datetime.utcnow().strftime("%Y-%m-%d")
-        basketball_url = SPORT_ENDPOINTS["basketball"].format(date=today)
-        basketball_matches = await fetch_api(session, basketball_url, SPORTSDATAIO_BASKETBALL_KEY, "basketball")
+        basketball_matches = await fetch_basketball(session)
         all_matches.extend(basketball_matches)
-        log.info(f"Fetched {len(basketball_matches)} basketball matches from SportsDataIO.")
 
-        # 3️⃣ Tenis
-        tennis_matches = await fetch_api(session, SPORT_ENDPOINTS["tennis"], API_FOOTBALL_KEY, "tennis")
+        tennis_matches = await fetch_tennis(session)
         all_matches.extend(tennis_matches)
-        log.info(f"Fetched {len(tennis_matches)} tennis matches.")
 
         return all_matches
