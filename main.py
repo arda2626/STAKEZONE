@@ -71,10 +71,20 @@ async def build_coupon(min_conf, title, live=False):
         "ABONE OL! @stakedrip"
     )
 
-async def hourly_job(c): t = await build_coupon(0.55, "CANLI KUPON", True); if t: await c.bot.send_message(CHANNEL_ID, t, parse_mode="HTML")
-async def daily_job(c): t = await build_coupon(0.60, "GÜNLÜK KUPON"); if t: await c.bot.send_message(CHANNEL_ID, t, parse_mode="HTML")
-async def vip_job(c): t = await build_coupon(0.80, "VIP KUPON"); if t: await c.bot.send_message(CHANNEL_ID, t, parse_mode="HTML")
+async def hourly_job(ctx):
+    text = await build_coupon(0.55, "CANLI KUPON", True)
+    if text:
+        await ctx.bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
 
+async def daily_job(ctx):
+    text = await build_coupon(0.60, "GÜNLÜK KUPON")
+    if text:
+        await ctx.bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
+
+async def vip_job(ctx):
+    text = await build_coupon(0.80, "VIP KUPON")
+    if text:
+        await ctx.bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
 app = FastAPI()
 tg = Application.builder().token(TELEGRAM_TOKEN).build()
 tg.add_handler(CommandHandler("vip", lambda u,c: vip_job(c) or u.message.reply_text("VIP GÖNDERİLDİ")))
