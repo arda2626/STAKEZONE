@@ -1,100 +1,87 @@
-# ================== utils.py — STAKEDRIP AI ULTRA v5.0 ==================
-import random
-from datetime import datetime, timezone
+# ================== utils.py — STAKEDRIP AI ULTRA v5.1 ==================
+import math
 
-# ================== EMOJİ SETİ ==================
+# ================== EMOJIS ==================
 EMOJI = {
-    "fire": "🔥",
-    "star": "⭐️",
-    "money": "💰",
-    "chart": "📊",
-    "trophy": "🏆",
-    "alarm": "⏰",
-    "live": "🟢",
     "football": "⚽️",
     "basketball": "🏀",
     "tennis": "🎾",
-    "calendar": "📅",
-    "earth": "🌍",
-    "rocket": "🚀",
+    "star": "⭐️",
+    "live": "🔴",
+    "clock": "⏱️",
+    "time": "⏰",
+    "money": "💰",
+    "chart": "📊"
 }
 
+# ================== COUNTRY FLAGS ==================
 EMOJI_MAP = {
-    "football": EMOJI["football"],
-    "basketball": EMOJI["basketball"],
-    "tennis": EMOJI["tennis"]
+    "england": "🏴",
+    "turkey": "🇹🇷",
+    "germany": "🇩🇪",
+    "spain": "🇪🇸",
+    "italy": "🇮🇹",
+    "france": "🇫🇷",
+    "netherlands": "🇳🇱",
+    "portugal": "🇵🇹",
+    "brazil": "🇧🇷",
+    "argentina": "🇦🇷",
+    "usa": "🇺🇸",
+    "belgium": "🇧🇪",
+    "greece": "🇬🇷",
+    "russia": "🇷🇺",
+    "croatia": "🇭🇷",
+    "sweden": "🇸🇪",
+    "norway": "🇳🇴",
+    "switzerland": "🇨🇭",
+    "australia": "🇦🇺",
+    "japan": "🇯🇵",
+    "china": "🇨🇳",
+    "korea": "🇰🇷",
+    "saudi arabia": "🇸🇦",
+    "mexico": "🇲🇽",
+    "scotland": "🏴",
+    "denmark": "🇩🇰",
+    "austria": "🇦🇹",
+    "poland": "🇵🇱",
+    "czech republic": "🇨🇿",
+    "romania": "🇷🇴",
+    "serbia": "🇷🇸",
+    "israel": "🇮🇱",
+    "ukraine": "🇺🇦"
 }
 
-# ================== ZAMAN ==================
-def utcnow():
-    return datetime.now(timezone.utc)
-
-def format_time(ts):
-    if isinstance(ts, str):
-        return ts
-    return ts.strftime("%H:%M")
-
-# ================== BAYRAKLAR ==================
+# ================== HELPERS ==================
 def league_to_flag(league_name: str) -> str:
-    """Lige veya ülkeye göre uygun bayrak döndürür."""
-    name = league_name.lower()
-    flags = {
-        # Avrupa
-        "turkey": "🇹🇷", "super lig": "🇹🇷",
-        "england": "🏴", "premier": "🏴",
-        "spain": "🇪🇸", "la liga": "🇪🇸",
-        "italy": "🇮🇹", "serie a": "🇮🇹",
-        "germany": "🇩🇪", "bundesliga": "🇩🇪",
-        "france": "🇫🇷", "ligue": "🇫🇷",
-        "netherlands": "🇳🇱", "eredivisie": "🇳🇱",
-        "portugal": "🇵🇹", "liga portugal": "🇵🇹",
-        "belgium": "🇧🇪", "pro league": "🇧🇪",
-        "switzerland": "🇨🇭", "austria": "🇦🇹", "scotland": "🏴",
-        "greece": "🇬🇷", "denmark": "🇩🇰", "norway": "🇳🇴", "sweden": "🇸🇪",
-        "finland": "🇫🇮", "poland": "🇵🇱", "czech": "🇨🇿", "croatia": "🇭🇷",
-        "serbia": "🇷🇸", "romania": "🇷🇴", "hungary": "🇭🇺", "ukraine": "🇺🇦", "russia": "🇷🇺",
-
-        # Amerika
-        "usa": "🇺🇸", "mls": "🇺🇸", "mexico": "🇲🇽", "brazil": "🇧🇷", "brasileirao": "🇧🇷",
-        "argentina": "🇦🇷", "chile": "🇨🇱", "colombia": "🇨🇴", "uruguay": "🇺🇾",
-        "ecuador": "🇪🇨", "peru": "🇵🇪", "canada": "🇨🇦",
-
-        # Asya
-        "japan": "🇯🇵", "j-league": "🇯🇵", "china": "🇨🇳", "south korea": "🇰🇷",
-        "k league": "🇰🇷", "saudi": "🇸🇦", "qatar": "🇶🇦", "uae": "🇦🇪", "iran": "🇮🇷",
-        "israel": "🇮🇱", "india": "🇮🇳", "indonesia": "🇮🇩", "vietnam": "🇻🇳", "thailand": "🇹🇭",
-
-        # Afrika
-        "egypt": "🇪🇬", "morocco": "🇲🇦", "south africa": "🇿🇦", "nigeria": "🇳🇬",
-        "ghana": "🇬🇭", "algeria": "🇩🇿", "tunisia": "🇹🇳", "senegal": "🇸🇳",
-
-        # Okyanusya
-        "australia": "🇦🇺", "new zealand": "🇳🇿",
-    }
-    for key, flag in flags.items():
-        if key in name:
+    if not league_name:
+        return "🏆"
+    lname = league_name.lower()
+    for key, flag in EMOJI_MAP.items():
+        if key in lname:
             return flag
-    return EMOJI["earth"]
+    return "🏆"
 
-# ================== BANNER ==================
-def banner(predictions, title="LIVE AI PREDICTIONS"):
-    """Tahmin listesini şık bir banner formatında döndürür."""
-    lines = []
-    header = f"{EMOJI['rocket']} <b>{title}</b> {EMOJI['fire']}\n"
-    lines.append(header)
+def banner_line(match):
+    """Tek maç için Türkçeleştirilmiş, zengin banner satırı üretir"""
+    sport_emoji = EMOJI.get(match.get("sport", "football"), "⚽️")
+    flag = league_to_flag(match.get("league", ""))
+    home, away = match.get("home", "?"), match.get("away", "?")
+    odds = match.get("odds", 1.0)
+    confidence = match.get("confidence", 0.0)
+    minute = match.get("minute", None)
+    live = match.get("live", False)
 
-    for p in predictions:
-        sport_icon = EMOJI_MAP.get(p.get("sport", "football"), EMOJI["football"])
-        flag = league_to_flag(p.get("league", ""))
-        teams = f"{p.get('home', '')} vs {p.get('away', '')}"
-        conf = f"{p.get('confidence', 0)*100:.1f}%"
-        odds = f"{p.get('odds', 1.5):.2f}"
+    status = f"{EMOJI['live']} CANLI ({EMOJI['clock']} {minute}’)" if live and minute else "Yaklaşan Maç"
+    return (
+        f"{sport_emoji} {flag} {match.get('league','Lig')} | {status}\n"
+        f"{home} vs {away}\n"
+        f"{EMOJI['chart']} Oran: {odds:.2f} | {EMOJI['star']} Güven oranı: {confidence*100:.1f}%"
+    )
 
-        line = (
-            f"{sport_icon} {flag} <b>{teams}</b>\n"
-            f"   {EMOJI['chart']} Odds: {odds} | {EMOJI['star']} Confidence: {conf}\n"
-        )
-        lines.append(line)
-
-    footer = f"\n{EMOJI['money']} <i>STAKEDRIP AI - Smart Betting Intelligence</i>"
-    return "\n".join(lines) + footer
+def banner(matches, title="🎯 AI Tahminleri"):
+    """Genel banner metni oluşturur"""
+    lines = [f"<b>{title}</b>\n"]
+    for m in matches:
+        lines.append(banner_line(m))
+        lines.append("—" * 25)
+    return "\n".join(lines)
