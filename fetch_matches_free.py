@@ -36,6 +36,7 @@ async def fetch_football(session):
                         "confidence": 0.5,
                         "date": dt.isoformat(),
                         "live": False,
+                        "flag": "",           # bayrak boş, daha sonra ekle
                     }
 
                     # --- THESPORTSDB den oran çek ---
@@ -47,6 +48,9 @@ async def fetch_football(session):
                                 event = odds_data.get("events", [])[0] if odds_data.get("events") else {}
                                 if event:
                                     match["odds"] = float(event.get("strHomeWinOdds", match["odds"]))
+                                    # Bayrak emoji ekle (ülke adını kullanarak)
+                                    country_name = m.get("competition", {}).get("area", {}).get("name", "")
+                                    match["flag"] = country_to_emoji(country_name)
                     except Exception as e_odds:
                         log.warning(f"ThesportsDB odds fetch failed: {e_odds}")
 
@@ -78,6 +82,7 @@ async def fetch_basketball(session):
                         "confidence": 0.5,
                         "date": dt.isoformat(),
                         "live": False,
+                        "flag": "🇺🇸",
                     })
                 except Exception as e_inner:
                     log.warning(f"Skipping basketball match due to parse error: {e_inner}")
@@ -110,6 +115,7 @@ async def fetch_tennis(session):
                         "confidence": 0.5,
                         "date": datetime.now(timezone.utc).isoformat(),
                         "live": False,
+                        "flag": "🎾",
                     })
                 except Exception as e_inner:
                     log.warning(f"Skipping tennis match due to parse error: {e_inner}")
@@ -117,6 +123,25 @@ async def fetch_tennis(session):
     except Exception as e:
         log.error(f"tennis fetch exception: {e}")
         return []
+
+# ================== UTILS ==================
+def country_to_emoji(country_name):
+    mapping = {
+        "England": "🏴", "Scotland": "🏴", "Wales": "🏴", "Northern Ireland": "🇬🇧",
+        "France": "🇫🇷", "Spain": "🇪🇸", "Germany": "🇩🇪", "Italy": "🇮🇹",
+        "Portugal": "🇵🇹", "Netherlands": "🇳🇱", "Belgium": "🇧🇪", "Sweden": "🇸🇪",
+        "Norway": "🇳🇴", "Denmark": "🇩🇰", "Finland": "🇫🇮", "Poland": "🇵🇱",
+        "Switzerland": "🇨🇭", "Austria": "🇦🇹", "Czech Republic": "🇨🇿", "Slovakia": "🇸🇰",
+        "Hungary": "🇭🇺", "Russia": "🇷🇺", "Ukraine": "🇺🇦", "Turkey": "🇹🇷",
+        "Greece": "🇬🇷", "Croatia": "🇭🇷", "Serbia": "🇷🇸", "Romania": "🇷🇴",
+        "Bulgaria": "🇧🇬", "Ireland": "🇮🇪", "Scotland": "🏴", "Iceland": "🇮🇸",
+        "USA": "🇺🇸", "Canada": "🇨🇦", "Mexico": "🇲🇽", "Brazil": "🇧🇷",
+        "Argentina": "🇦🇷", "Chile": "🇨🇱", "Colombia": "🇨🇴", "Uruguay": "🇺🇾",
+        "Japan": "🇯🇵", "China": "🇨🇳", "South Korea": "🇰🇷", "Australia": "🇦🇺",
+        "New Zealand": "🇳🇿", "India": "🇮🇳", "South Africa": "🇿🇦", "Egypt": "🇪🇬",
+        # Daha fazla ülke ekleyebilirsiniz
+    }
+    return mapping.get(country_name, "")
 
 # ================== MAIN FETCH FUNCTION ==================
 async def fetch_all_matches():
