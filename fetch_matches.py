@@ -1,11 +1,11 @@
-# ================== fetch_matches_auto.py — STAKEDRIP AI ULTRA v6 ==================
+# ================== fetch_matches.py — STAKEDRIP AI ULTRA v5.6 ==================
 import aiohttp
 import logging
 
 log = logging.getLogger("stakedrip")
 
 # ================== API KEYS ==================
-API_FOOTBALL_KEY = "3838237ec41218c2572ce541708edcfd"
+API_FOOTBALL_KEY = "5654d778e6092b57eea0f2c640addeb6"
 API_FOOTBALL_BASE = "https://v3.football.api-sports.io"
 
 THE_ODDS_API_KEY = "41eb74e295dfecf0a675417cbb56cf4d"
@@ -104,6 +104,7 @@ async def fetch_all_matches():
         football_matches = await fetch_api(session, SPORT_ENDPOINTS["football"], API_FOOTBALL_KEY, "football")
         log.info(f"Fetched {len(football_matches)} football matches from API-Football.")
 
+        # Fallback: The Odds API
         if not football_matches:
             url = f"{THE_ODDS_API_BASE}/soccer/odds/?apiKey={THE_ODDS_API_KEY}&regions=all&markets=h2h,totals,spreads"
             football_matches = await fetch_api(session, url, THE_ODDS_API_KEY, "theodds")
