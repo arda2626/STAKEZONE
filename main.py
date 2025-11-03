@@ -1,9 +1,8 @@
-# ================== main_webhook_admin.py — STAKEDRIP AI ULTRA Webhook v5.6 ==================
-import asyncio
-import logging
-from datetime import datetime, timedelta, time as dt_time, timezone
-from telegram.ext import Application, JobQueue, ContextTypes, CommandHandler
-from telegram import Update, ChatAction
+# ================== main_webhook.py — STAKEDRIP AI ULTRA Webhook v5.6 ==================
+import asyncio, logging
+from datetime import time as dt_time, timezone
+from telegram.ext import Application, JobQueue, ContextTypes
+from telegram import Update
 from fastapi import FastAPI, Request
 import uvicorn
 
@@ -24,8 +23,6 @@ MIN_ODDS = 1.20
 WEBHOOK_PATH = "/stakedrip"
 WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 
-ADMIN_IDS = [123456789]  # Telegram ID'nizi buraya ekleyin
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
@@ -33,6 +30,9 @@ log = logging.getLogger("stakedrip")
 async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
+        # Bot typing action (v20+ uyumlu)
+        await bot.send_chat_action(chat_id=CHANNEL_ID, action="typing")
+
         matches = await fetch_all_matches()
         live = [m for m in matches if m.get("live") or m.get("is_live")]
         chosen = []
@@ -60,35 +60,39 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
 async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
+        await bot.send_chat_action(chat_id=CHANNEL_ID, action="typing")
+
         matches = await fetch_all_matches()
         upcoming = [m for m in matches if not (m.get("live") or m.get("is_live"))]
-        now = datetime.utcnow()
-        next_24h = now + timedelta(hours=24)
-        upcoming_24h = []
-        for m in upcoming:
-            t = m.get("timestamp")  # API-Football için fixture timestamp
-            if t and now.timestamp() <= t <= next_24h.timestamp():
-                upcoming_24h.append(m)
         picks = []
-        for m in upcoming_24h:
+        for m in upcoming:
             p = ai_predict(m)
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
-            p.setdefault("odds", m.get("odds", 1.5))
-            p.setdefault("confidence", p.get("confidence", 0.5))
+            p.setdefault("odds", m.get("odds",1.5))
+            p.setdefault("confidence", p.get("confidence",0.5))
             picks.append(p)
-        if picks:
-            text = create_daily_banner(picks)
+        # 24 saat içinde oynanacak maçlar için filtreleme
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        next_24h = now + timedelta(hours=24)
+        chosen = [p for p in picks if 'start_time' in p and now <= p['start_time'] <= next_24h]
+        # Eğer start_time yoksa fallback olarak en güvenilir 12 maç
+        if not chosen:
+            chosen = sorted(picks, key=lambda x: x.get("confidence",0), reverse=True)[:12]
+
+        if chosen:
+            text = create_daily_banner(chosen)
             await bot.send_message(CHANNEL_ID, text, parse_mode="HTML")
             log.info("daily_coupon: gönderildi")
-        else:
-            log.info("daily_coupon: uygun maç yok")
     except Exception:
         log.exception("daily_coupon hata:")
 
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
+        await bot.send_chat_action(chat_id=CHANNEL_ID, action="typing")
+
         matches = await fetch_all_matches()
         picks = []
         for m in matches:
@@ -115,38 +119,6 @@ async def results_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("results_job hata:")
 
-# ================= ADMIN COMMANDS =================
-async def test_daily_coupon(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS:
-        await update.message.reply_text("Yetkiniz yok.")
-        return
-    await ctx.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    try:
-        matches = await fetch_all_matches()
-        upcoming = [m for m in matches if not (m.get("live") or m.get("is_live"))]
-        now = datetime.utcnow()
-        next_24h = now + timedelta(hours=24)
-        upcoming_24h = []
-        for m in upcoming:
-            t = m.get("timestamp")
-            if t and now.timestamp() <= t <= next_24h.timestamp():
-                upcoming_24h.append(m)
-        picks = []
-        for m in upcoming_24h:
-            p = ai_predict(m)
-            p.setdefault("home", m.get("home"))
-            p.setdefault("away", m.get("away"))
-            p.setdefault("odds", m.get("odds",1.5))
-            p.setdefault("confidence", p.get("confidence",0.5))
-            picks.append(p)
-        if picks:
-            text = create_daily_banner(picks)
-            await update.message.reply_text(text, parse_mode="HTML")
-        else:
-            await update.message.reply_text("Son 24 saatte oynanacak uygun maç bulunamadı.")
-    except Exception as e:
-        await update.message.reply_text(f"Hata oluştu: {e}")
-
 # ================= FASTAPI + TELEGRAM =================
 fastapi_app = FastAPI()
 telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -155,16 +127,13 @@ telegram_app = Application.builder().token(TELEGRAM_TOKEN).build()
 async def startup():
     init_db(DB_FILE)
     log.info("✅ Database initialized")
-    
+
     jq: JobQueue = telegram_app.job_queue
     jq.run_repeating(hourly_live_job, interval=3600, first=10, name="hourly_live")
     jq.run_repeating(daily_coupon_job, interval=3600*12, first=60, name="daily_coupon")
     jq.run_repeating(vip_coupon_job, interval=86400, first=120, name="vip_coupon")
     jq.run_daily(results_job, time=dt_time(hour=20, minute=0, tzinfo=timezone.utc), name="results_check")
-    
-    # Admin komutları
-    telegram_app.add_handler(CommandHandler("test_daily", test_daily_coupon))
-    
+
     await telegram_app.initialize()
     await telegram_app.start()
     await telegram_app.bot.set_webhook(WEBHOOK_URL)
@@ -184,6 +153,5 @@ async def webhook(req: Request):
     await telegram_app.update_queue.put(update)
     return {"ok": True}
 
-# ================= START FASTAPI =================
 if __name__ == "__main__":
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8443)
