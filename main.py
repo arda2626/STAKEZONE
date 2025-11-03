@@ -1,4 +1,4 @@
-# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.12 ==================
+# ================== main.py — STAKEDRIP AI ULTRA Webhook Free v5.13 ==================
 import asyncio, logging
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler, JobQueue, ContextTypes
@@ -24,17 +24,42 @@ WEBHOOK_URL = "https://yourdomain.com" + WEBHOOK_PATH
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(message)s")
 log = logging.getLogger("stakedrip")
 
+# ================== BAYRAK FONKSİYONU ==================
+def country_to_flag(country_name):
+    mapping = {
+        "Portugal": "🇵🇹",
+        "Italy": "🇮🇹",
+        "England": "🏴",
+        "Spain": "🇪🇸",
+        "USA": "🇺🇸",
+        "Turkey": "🇹🇷",
+        # diğer ülkeleri buraya ekleyebilirsin
+    }
+    return mapping.get(country_name, "")
+
 # ================= BASİT BANNER FONKSİYONLARI =================
 def create_daily_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
+    lines = []
+    for p in picks:
+        home_flag = country_to_flag(p.get("home_country",""))
+        away_flag = country_to_flag(p.get("away_country",""))
+        lines.append(f"{home_flag} {p['home']} vs {away_flag} {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5):.2f}")
     return "<b>Günlük Kupon</b>\n" + "\n".join(lines)
 
 def create_vip_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
+    lines = []
+    for p in picks:
+        home_flag = country_to_flag(p.get("home_country",""))
+        away_flag = country_to_flag(p.get("away_country",""))
+        lines.append(f"{home_flag} {p['home']} vs {away_flag} {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5):.2f}")
     return "<b>VIP Kupon</b>\n" + "\n".join(lines)
 
 def create_live_banner(picks):
-    lines = [f"{p['home']} vs {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5)}" for p in picks]
+    lines = []
+    for p in picks:
+        home_flag = country_to_flag(p.get("home_country",""))
+        away_flag = country_to_flag(p.get("away_country",""))
+        lines.append(f"{home_flag} {p['home']} vs {away_flag} {p['away']} | {p.get('bet','Tahmin Yok')}, {p.get('odds',1.5):.2f}")
     return "<b>Canlı Maçlar</b>\n" + "\n".join(lines)
 
 # ================= JOB FUNCTIONS =================
@@ -53,20 +78,23 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=24, path=DB_FILE):
                 continue
 
-            # Default değerleri setle
-            m.setdefault("home", m.get("home", "Unknown"))
-            m.setdefault("away", m.get("away", "Unknown"))
+            m.setdefault("home", m.get("home","Unknown"))
+            m.setdefault("away", m.get("away","Unknown"))
             m.setdefault("odds", 1.5)
+            m.setdefault("home_country", m.get("country",""))
+            m.setdefault("away_country", m.get("country",""))
 
             p = ai_predict(m)
-            log.info(f"ai_predict({m['home']} vs {m['away']}) -> {p}")  # Tahmin logu
+            log.info(f"ai_predict({m['home']} vs {m['away']}) -> {p}")
 
             if "bet" not in p or not p["bet"]:
                 p["bet"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
-            p.setdefault("odds", m.get("odds", 1.5))
-            p.setdefault("confidence", p.get("confidence", 0.5))
+            p.setdefault("odds", m.get("odds",1.5))
+            p.setdefault("confidence", p.get("confidence",0.5))
+            p.setdefault("home_country", m.get("home_country",""))
+            p.setdefault("away_country", m.get("away_country",""))
 
             if p["confidence"] >= MIN_CONFIDENCE and p["odds"] >= MIN_ODDS:
                 picks.append((m["id"], p))
@@ -85,6 +113,7 @@ async def daily_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     except Exception:
         log.exception("daily_coupon hata:")
 
+# VIP ve LIVE jobları da aynı mantıkla güncellenebilir
 async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
     bot = ctx.bot
     try:
@@ -100,9 +129,11 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
             if was_posted_recently(m["id"], hours=48, path=DB_FILE):
                 continue
 
-            m.setdefault("home", m.get("home", "Unknown"))
-            m.setdefault("away", m.get("away", "Unknown"))
+            m.setdefault("home", m.get("home","Unknown"))
+            m.setdefault("away", m.get("away","Unknown"))
             m.setdefault("odds", 1.5)
+            m.setdefault("home_country", m.get("country",""))
+            m.setdefault("away_country", m.get("country",""))
 
             p = ai_predict(m)
             log.info(f"ai_predict VIP({m['home']} vs {m['away']}) -> {p}")
@@ -111,8 +142,10 @@ async def vip_coupon_job(ctx: ContextTypes.DEFAULT_TYPE):
                 p["bet"] = "Tahmin Yok"
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
-            p.setdefault("odds", m.get("odds", 1.5))
-            p.setdefault("confidence", p.get("confidence", 0.5))
+            p.setdefault("odds", m.get("odds",1.5))
+            p.setdefault("confidence", p.get("confidence",0.5))
+            p.setdefault("home_country", m.get("home_country",""))
+            p.setdefault("away_country", m.get("away_country",""))
 
             if p["confidence"] >= MIN_CONFIDENCE_VIP and p["odds"] >= MIN_ODDS:
                 picks.append((m["id"], p))
@@ -136,9 +169,11 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
         picks = []
 
         for m in live_matches:
-            m.setdefault("home", m.get("home", "Unknown"))
-            m.setdefault("away", m.get("away", "Unknown"))
+            m.setdefault("home", m.get("home","Unknown"))
+            m.setdefault("away", m.get("away","Unknown"))
             m.setdefault("odds", 1.5)
+            m.setdefault("home_country", m.get("country",""))
+            m.setdefault("away_country", m.get("country",""))
 
             p = ai_predict(m)
             log.info(f"ai_predict LIVE({m['home']} vs {m['away']}) -> {p}")
@@ -148,6 +183,8 @@ async def hourly_live_job(ctx: ContextTypes.DEFAULT_TYPE):
             p.setdefault("home", m.get("home"))
             p.setdefault("away", m.get("away"))
             p.setdefault("odds", m.get("odds",1.5))
+            p.setdefault("home_country", m.get("home_country",""))
+            p.setdefault("away_country", m.get("away_country",""))
 
             if p["odds"] >= MIN_ODDS:
                 picks.append(p)
