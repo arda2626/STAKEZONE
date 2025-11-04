@@ -1,4 +1,4 @@
-# main.py — v62.9 (Anlık Analiz - Instant Analysis Eklendi)
+# main.py — v62.9 (Anlık Analiz - Instant Analysis Entegre ve Global Hatalar Düzeltildi)
 
 import os
 import asyncio
@@ -69,7 +69,7 @@ AI_MAX_CALLS_PER_MINUTE = 5
 
 # state
 posted_matches = {}
-# Buraya 'INSTANT' eklendi
+# Buraya 'INSTANT' ve 'LAST_COUPON_POSTED' eklendi
 last_run = {"DAILY": None, "VIP": None, "LIVE": None, "NBA": None, "INSTANT": None, "LAST_COUPON_POSTED": None} 
 ai_rate_limit = {"calls": 0, "reset": NOW_UTC} 
 
@@ -822,7 +822,8 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
             
     if not target_matches:
         log.info("Anlık Analiz için uygun maç bulunamadı (30dk-24saat aralığında).")
-        last_run["INSTANT"] = datetime.now(timezone.utc)
+        # last_run["INSTANT"] burada güncellenmeyecek, böylece bir sonraki 20 dakikalık kontrolde tekrar dener.
+        # Bu, botun boş bir döngüde sürekli dönmesini engellerken, bir sonraki kontrolü kaçırmamasını sağlar.
         return
 
     # Güven yüzdesine göre en iyi 1 maçı seçmek için build_coupon_text'i kullan
@@ -833,10 +834,10 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
         coupon_type="INSTANT"
     )
     
+    global last_run
     if text:
         # Hemen gönderme
         await send_to_channel(app, text)
-        global last_run
         last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     else:
         log.info(f"Anlık Analiz kuponu oluşturulamadı (Filtreler veya Min %{INSTANT_ANALYSIS_MIN_CONFIDENCE} güven).")
@@ -861,9 +862,9 @@ async def run_nba_coupon_job(app: Application, all_matches: list):
         coupon_type="NBA"
     )
     
+    global last_run
     if text:
         await send_to_channel(app, text)
-        global last_run
         last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     else:
         log.info("NBA kuponu oluşturulamadı (Filtreler veya Min Maç Sayısı).")
@@ -958,6 +959,8 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def initial_runs_scheduler(app: Application, all_matches):
     """Bot başlatıldıktan sonra istenen ilk kuponları belirli sürelerde gönderir."""
     
+    global last_run # Global deklarasyon
+    
     # --- 1. INSTANT ANALYSIS COUPON (Anında Çalışsın) ---
     await asyncio.sleep(5)
     log.info("İlk Anlık Analiz Kuponu hemen hazırlanıyor.")
@@ -1006,7 +1009,9 @@ async def initial_runs_scheduler(app: Application, all_matches):
 
 
 async def job_runner(app: Application):
+    # Düzeltme: Tüm global deklarasyonlar fonksiyonun en başına taşındı.
     global last_run
+    global ai_rate_limit
     
     await asyncio.sleep(15) 
     
@@ -1016,7 +1021,7 @@ async def job_runner(app: Application):
         try:
             now = datetime.now(timezone.utc)
             
-            global ai_rate_limit
+            # AI Rate Limit sıfırlama (Her döngü başında)
             ai_rate_limit["calls"] = 0
             ai_rate_limit["reset"] = now + timedelta(seconds=60) 
             
@@ -1079,10 +1084,11 @@ async def job_runner(app: Application):
                 await run_nba_coupon_job(app, all_matches)
             
             # --- INSTANT ANALYSIS (20 dakikada bir kontrol) ---
-            # SADECE son 20 dakikada ana kupon (LIVE, DAILY, VIP, NBA) atılmadıysa çalıştır
+            # SADECE son 20 dakikada ana kupon (DAILY, VIP, NBA) atılmadıysa çalıştır
             lr_instant = last_run.get("INSTANT")
             
             last_post_time = last_run.get("LAST_COUPON_POSTED")
+            # Canlı (LIVE) kuponlar anlık gönderildiği için bu kontrolün dışında tutulur.
             is_gap = last_post_time is None or (now - last_post_time).total_seconds() >= 1200 # 20 dakika (1200 saniye)
             
             is_instant_due = lr_instant is None or (now - lr_instant).total_seconds() >= INSTANT_ANALYSIS_INTERVAL_MINUTES*60
