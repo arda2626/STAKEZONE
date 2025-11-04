@@ -1,4 +1,4 @@
-# main.py — v40.4 (Tek dosya, %100 AI tahmin + Tüm API'ler aktif)
+# main.py — v40.5 (Kritik hata düzeltmesi)
 # Gereken env:
 #   AI_KEY -> OpenAI API Key (zorunlu)
 #   TELEGRAM_TOKEN -> Telegram bot token (zorunlu)
@@ -9,6 +9,7 @@ import asyncio
 import logging
 import json
 import random
+import sys # Yeni import
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -17,8 +18,9 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ---------------- CONFIG ----------------
+# Log formatı eklendi
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v40.4")
+log = logging.getLogger("v40.5")
 
 AI_KEY = os.getenv("AI_KEY", "").strip()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
@@ -48,7 +50,6 @@ VIP = 24
 VIP_MAX_MATCHES = 2
 
 # state
-# posted_matches artık (match_id, post_time) şeklinde tutulacak
 posted_matches = {} # {id: datetime.utc}
 last_run = {"LIVE": None, "DAILY": None, "VIP": None}
 ai_rate_limit = {"calls": 0, "reset": NOW_UTC}
@@ -59,9 +60,7 @@ def to_local_str(iso_ts: str):
     if not iso_ts:
         return "Bilinmeyen"
     try:
-        # 'Z' son eki veya ISO formatındaki standart UTC işaretçilerini yönet
         dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-        # Eğer zaman dilimi bilgisi yoksa, onu UTC kabul et
         if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
              dt = dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(TR_TZ).strftime("%d %b %H:%M")
@@ -78,8 +77,8 @@ def within_hours(iso_ts: str, hours: int):
              dt = dt.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         delta = (dt - now).total_seconds()
-        # Maç şimdi başladıysa veya gelecekte belirtilen saat içinde mi?
-        return -3600 <= delta <= hours * 3600 # -1 saatten itibaren de kabul edilebilir
+        # Şimdi başladıysa veya gelecekte belirtilen saat içinde mi? (-1 saat tolerans)
+        return -3600 <= delta <= hours * 3600
     except Exception:
         return False
 
@@ -96,7 +95,6 @@ def cleanup_posted_matches():
     """posted_matches kümesinden 24 saatten eski kayıtları temizler."""
     global posted_matches
     now = datetime.now(timezone.utc)
-    # 24 saatten daha yeni olanları koru
     posted_matches = {mid: dt for mid, dt in posted_matches.items() if (now - dt).total_seconds() < 24*3600}
     log.info(f"Temizleme sonrası posted_matches boyutu: {len(posted_matches)}")
 
@@ -104,9 +102,9 @@ def cleanup_posted_matches():
 async def fetch_api_football(session):
     res = []
     url = "https://v3.football.api-sports.io/fixtures"
-    # Canlı veya 24 saat içindeki maçları almayı denemek için birleştirilmiş sorgu
+    # Güncel ve sonraki 24 saat
     end_time = datetime.now(timezone.utc) + timedelta(hours=24)
-    params = {"from": NOW_UTC.strftime("%Y-%m-%d"), "to": end_time.strftime("%Y-%m-%d")}
+    params = {"from": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "to": end_time.strftime("%Y-%m-%d")}
     headers = {"x-apisports-key": API_FOOTBALL_KEY}
     try:
         async with session.get(url, params=params, headers=headers, timeout=12) as r:
@@ -119,22 +117,23 @@ async def fetch_api_football(session):
                 fix = it.get("fixture", {})
                 teams = it.get("teams", {})
                 status_short = (safe_get(fix, "status", "short") or "").lower()
-                start = fix.get("date") # ISO formatında olmalı
+                start = fix.get("date")
                 
-                # Sadece Canlı (IN_PLAY, HT, vb.) veya 24 saat içinde başlayacak/başlamış olanları dahil et
+                # Biten, ertelenen, iptal olanları atla
                 if status_short in ("ft", "pst", "canc", "abd", "awd", "wo"):
-                    continue # Biten, ertelenen, iptal olanları atla
+                    continue
                 
                 if not start: continue
                 
-                is_live = status_short not in ("ns", "tbd") # ns: Not Started, tbd: To Be Defined
+                # ns: Not Started, tbd: To Be Defined dışındaki her şey canlı sayılır
+                is_live = status_short not in ("ns", "tbd")
                 
-                # Canlı değilse ve 24 saat içinde başlamıyorsa atla (within_hours'ta -1h tolerans var)
+                # Canlı değilse ve 24 saat içinde başlamıyorsa atla
                 if not is_live and not within_hours(start, 24):
                     continue
                     
                 res.append({
-                    "id": f"apif_{safe_get(fix,'id') or hash(json.dumps(it, default=str))}",
+                    "id": safe_get(fix,'id'), # API'den gelen ID
                     "home": safe_get(teams,"home","name") or "Home",
                     "away": safe_get(teams,"away","name") or "Away",
                     "start": start,
@@ -165,11 +164,10 @@ async def fetch_the_odds(session):
                 for it in data:
                     start = it.get("commence_time")
                     if not start: continue
-                    # Sadece 24 saat içinde olanları dahil et (Canlı maçları sağlamıyor)
                     if not within_hours(start, 24):
                         continue
                     res.append({
-                        "id": f"odds_{it.get('id') or hash(json.dumps(it, default=str))}", # ID varsa kullan, yoksa hash
+                        "id": it.get('id'), # API'den gelen ID
                         "home": it.get("home_team","Home"),
                         "away": it.get("away_team","Away"),
                         "start": start,
@@ -198,11 +196,10 @@ async def fetch_footystats(session):
                 start = it.get("match_start_iso") or it.get("start_date")
                 is_live = it.get("status")=="live"
                 if not start: continue
-                # Sadece canlı veya 24 saat içinde olanları dahil et
                 if not (is_live or within_hours(start,24)):
                     continue
                 res.append({
-                    "id": f"footy_{it.get('id') or hash(json.dumps(it, default=str))}",
+                    "id": it.get('id'), # API'den gelen ID
                     "home": it.get("home_name","Home"),
                     "away": it.get("away_name","Away"),
                     "start": start,
@@ -218,7 +215,6 @@ async def fetch_allsports(session):
     res = []
     url = "https://allsportsapi2.p.rapidapi.com/api/football/matches/live"
     headers = {"x-rapidapi-host":"allsportsapi2.p.rapidapi.com","x-rapidapi-key":ALLSPORTSAPI_KEY}
-    # NOT: Bu API canlı sonuçlar için, bu yüzden within_hours kontrolü gerekmeyebilir, ancak ekleyelim.
     try:
         async with session.get(url, headers=headers, timeout=12) as r:
             if r.status != 200:
@@ -230,11 +226,10 @@ async def fetch_allsports(session):
                 start = it.get("event_date_start")
                 is_live = it.get("event_status")=="live"
                 if not start: continue
-                # Sadece canlı veya 24 saat içinde olanları dahil et
                 if not (is_live or within_hours(start,24)):
                     continue
                 res.append({
-                    "id": f"alls_{it.get('event_key') or hash(json.dumps(it, default=str))}",
+                    "id": it.get('event_key'), # API'den gelen ID
                     "home": it.get("event_home_team","Home"),
                     "away": it.get("event_away_team","Away"),
                     "start": start,
@@ -261,12 +256,11 @@ async def fetch_sportsmonks(session):
                 start = it.get("starting_at") or it.get("time")
                 is_live = it.get("status")=="live"
                 if not start: continue
-                # Sadece canlı veya 24 saat içinde olanları dahil et
                 if not (is_live or within_hours(start,24)):
                     continue
                 res.append({
-                    "id": f"sm_{it.get('id') or hash(json.dumps(it, default=str))}",
-                    "home": it.get("home_team","Home"),
+                    "id": it.get('id'), # API'den gelen ID
+                    "home": it.get("home_name","Home"),
                     "away": it.get("away_name","Away"),
                     "start": start,
                     "source": "SportsMonks",
@@ -282,8 +276,6 @@ async def fetch_isports(session):
     url = "https://api.isportsapi.com/sport/football/livescores"
     params = {"api_key": ISPORTSAPI_KEY}
     try:
-        # SSL sertifika hatası almamak için `ssl=False` kaldırıldı, API-Football'da bu sorun yoktu. 
-        # isportsapi'nin SSL'i sorunluysa tekrar eklenmeli. Şimdilik standart bırakıldı.
         async with session.get(url, params=params, timeout=12) as r:
             if r.status != 200:
                 log.warning(f"iSportsAPI HTTP {r.status}")
@@ -294,11 +286,10 @@ async def fetch_isports(session):
                 start = it.get("matchTime") or it.get("date")
                 is_live = it.get("status")=="live"
                 if not start: continue
-                # Sadece canlı veya 24 saat içinde olanları dahil et
                 if not (is_live or within_hours(start,24)):
                     continue
                 res.append({
-                    "id": f"isports_{it.get('matchId') or hash(json.dumps(it, default=str))}",
+                    "id": it.get('matchId'), # API'den gelen ID
                     "home": it.get("homeTeamName","Home"),
                     "away": it.get("awayTeamName","Away"),
                     "start": start,
@@ -336,16 +327,13 @@ async def fetch_all_matches():
         # Timestamp (sayı) ise ISO formatına dönüştür
         if isinstance(start, (int, float)):
             try:
-                # Unix zaman damgası her zaman UTC'dir
                 start = datetime.fromtimestamp(int(start), tz=timezone.utc).isoformat().replace('+00:00', 'Z')
             except:
                 start = ""
         
-        # Daha sağlam bir eşleştirme anahtarı oluştur: source_maçid
-        match_id = m.get("id") or f"{m.get('home')}_{m.get('away')}_{start}"
-        # Source bilgisini ID'ye ekleyerek farklı API'lerden gelen aynı maçların 
-        # farklı ID'ler almasını (ve eşleşme anahtarının benzersizliğini) garantile
-        final_id = f"{m.get('source')}_{match_id}"
+        # Benzersiz anahtar oluşturma: source_maçid_fallback (eğer ID yoksa)
+        match_id_base = m.get("id") or hash(json.dumps(m, default=str)) # ID yoksa hash kullan
+        final_id = f"{m.get('source')}_{match_id_base}"
         
         normalized.append({
             "id": final_id,
@@ -357,11 +345,12 @@ async def fetch_all_matches():
             "odds": m.get("odds", {})
         })
         
-    # dedupe - sadece source+id kombinasyonuna göre
+    # dedupe - sadece final_id (source+id/hash) kombinasyonuna göre
     seen = set()
     final = []
     for m in normalized:
         key = m.get("id")
+        if not key: continue # ID yoksa atla (olmaması gerekir)
         if key in seen:
             continue
         seen.add(key)
@@ -379,16 +368,13 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
     now = datetime.now(timezone.utc)
     if ai_rate_limit["reset"] < now:
         ai_rate_limit["calls"] = 0
-        # reset 60 saniye sonrası olmalı, şimdi + 60 saniye
         ai_rate_limit["reset"] = now + timedelta(seconds=60) 
     
-    # 60 saniyede 45 çağrı limiti (lokal throttle)
     if ai_rate_limit["calls"] >= 45: 
         log.warning("OpenAI local throttle active")
-        # Bekleme süresi: reset zamanı ile şimdi arasındaki fark + 1 saniye
         wait_time = (ai_rate_limit["reset"] - now).total_seconds() + 1
         await asyncio.sleep(wait_time)
-        return await call_openai_chat(prompt, max_tokens, temperature) # tekrar dene
+        return await call_openai_chat(prompt, max_tokens, temperature)
         
     headers = {"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"}
     payload = {
@@ -401,7 +387,6 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
         "max_tokens": max_tokens
     }
     
-    # API çağrısı yapılmadan önce çağrı sayacını artır
     ai_rate_limit["calls"] += 1 
     
     try:
@@ -411,12 +396,9 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
                 txt = await resp.text()
                 
                 if resp.status != 200:
-                    # Hata durumunda çağrı sayısını geri alma (başarısız çağrılar rate limit'i tüketmez)
-                    # Ancak rate limit'e takılma durumunda buraya düşer, bu yüzden lokal sayımı koruyalım
                     log.warning(f"OpenAI HTTP {resp.status}: {txt[:400]}")
                     return None
                 
-                # parse content
                 try:
                     data = json.loads(txt)
                     choices = data.get("choices")
@@ -426,13 +408,11 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
                     else:
                         content = txt
                         
-                    # extract JSON substring (bazen model başında/sonunda metin üretir)
                     start = content.find("{")
                     end = content.rfind("}") + 1
                     if start >= 0 and end > start:
                         return json.loads(content[start:end])
                     
-                    # fallback: içeriğin tamamını parse etmeye çalış
                     return json.loads(content)
                     
                 except Exception as e:
@@ -491,7 +471,6 @@ async def predict_for_match(m: dict, vip=False):
             p["confidence"] = 50
             
     best = ai_resp.get("best", 0)
-    # Gelen best index'i kontrol et
     if not isinstance(best, int) or best < 0 or best >= len(preds):
         best = max(range(len(preds)), key=lambda i: preds[i]["confidence"]) if preds else 0
         
@@ -508,7 +487,7 @@ def format_match_block(m, pred):
         f"⚽ <b>{m.get('home')} vs {m.get('away')}</b>\n"
         f"{start_local} — {m.get('source','Bilinmeyen')}"
         f"{' 🔴 CANLI' if m.get('live') else ''}"
-        f"{' (F)' if pred.get('fallback') else ''}\n" # Fallback durumunda belirt
+        f"{' (F)' if pred.get('fallback') else ''}\n"
     )
     
     # En İyi Tahmin
@@ -525,18 +504,16 @@ def format_match_block(m, pred):
     if other_lines:
         block += "\n" + "\n".join(other_lines) + "\n"
         
-    # Oran Bilgisi (çok uzun olmaması için sınırlandırıldı)
+    # Oran Bilgisi
     odd_text = ""
     try:
         odds_data = m.get("odds")
         if isinstance(odds_data, list) and odds_data:
-            # Sadece ilk kitapçıdan h2h oranlarını göster
             h2h_market = next((market for book in odds_data for market in book.get("markets",[]) if market.get("key") == "h2h"), None)
             if h2h_market and h2h_market.get("outcomes"):
                 outcomes = {o["name"]: o["price"] for o in h2h_market["outcomes"]}
                 odd_text = f"Oran (H2H): E:{outcomes.get('Home', '?')} B:{outcomes.get('Draw', '?')} D:{outcomes.get('Away', '?')}"
         elif isinstance(odds_data, dict) and odds_data:
-             # API-Football'dan gelen tek bir oran dict'ini parse et
             odd_text = f"Oran: {json.dumps(odds_data, default=str)[:150]}..."
     except Exception:
         odd_text = ""
@@ -559,17 +536,16 @@ async def build_coupon_text(matches, title, max_matches=3):
             break
             
         match_id = m.get("id")
-        # skip if already posted recently (24 saatten kısa süre önce)
+        # Zaten yayınlanmış mı (son 24 saat içinde)?
         if match_id in posted_matches and (now - posted_matches[match_id]).total_seconds() < 24*3600:
             log.info(f"Maç atlandı (zaten yayınlandı): {m.get('home')} vs {m.get('away')}")
             continue
             
         pred = await predict_for_match(m, vip=(title.startswith("VIP")))
         
-        # En az bir tahmin varsa ekle
         if pred.get("predictions"):
             lines.append(format_match_block(m, pred))
-            posted_matches[match_id] = now # Yayınlandı olarak işaretle
+            posted_matches[match_id] = now
             count += 1
             
     if not lines:
@@ -596,19 +572,17 @@ async def job_runner(app):
     """Belirli aralıklarla maçları çeken ve tahminleri yayınlayan ana döngü."""
     global last_run
     
-    # Başlangıçta 15 saniye bekle
-    await asyncio.sleep(15) 
+    await asyncio.sleep(15) # Başlangıç gecikmesi
     
     while True:
         try:
             now = datetime.now(timezone.utc)
-            cleanup_posted_matches() # Eski kayıtları temizle
+            cleanup_posted_matches()
             
-            # API'lardan tüm maçları çek
             matches = await fetch_all_matches()
             
             if not matches:
-                log.info("Tüm API'ler boş veya veri yok. Bir saat bekleniyor.")
+                log.info("Tüm API'ler boş veya veri yok.")
             else:
                 
                 # --- LIVE (Saatlik) ---
@@ -617,8 +591,6 @@ async def job_runner(app):
                     log.info("Canlı yayın döngüsü başladı.")
                     live_matches = [m for m in matches if m.get("live")]
                     if live_matches:
-                        # En yüksek confidence'a göre sıralama, ama burada tüm tahminler yapılmadığından
-                        # şimdilik sıralama yapılmıyor. Veya sadece canlı olanları alıyoruz.
                         text = await build_coupon_text(live_matches, "🔴 CANLI AI TAHMİN", max_matches=5)
                         if text:
                             await send_to_channel(app, text)
@@ -630,7 +602,6 @@ async def job_runner(app):
                     log.info("Günlük yayın döngüsü başladı.")
                     upcoming = [m for m in matches if (not m.get("live")) and within_hours(m.get("start") or "", 24)]
                     if upcoming:
-                        # Başlama saatine göre sırala
                         upcoming_sorted = sorted(upcoming, key=lambda x: x.get("start") or "")
                         text = await build_coupon_text(upcoming_sorted, "🗓️ GÜNLÜK AI TAHMİN", max_matches=3)
                         if text:
@@ -643,9 +614,7 @@ async def job_runner(app):
                     log.info("VIP yayın döngüsü başladı.")
                     vip_upcoming = [m for m in matches if (not m.get("live")) and within_hours(m.get("start") or "", 24)]
                     if vip_upcoming:
-                        # Başlama saatine göre sırala
                         vip_sorted = sorted(vip_upcoming, key=lambda x: x.get("start") or "")
-                        # VIP tahminler için sıcaklık (temperature) daha düşük (0.1) kullanılacak
                         text = await build_coupon_text(vip_sorted, "👑 VIP AI TAHMİN", max_matches=VIP_MAX_MATCHES)
                         if text:
                             await send_to_channel(app, text)
@@ -654,14 +623,13 @@ async def job_runner(app):
         except Exception as e:
             log.exception(f"Job runner hata: {e}")
             
-        await asyncio.sleep(3600)  # Bir saat bekle
+        await asyncio.sleep(3600)
 
 # ---------------- Telegram command ----------------
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/test komutu ile manuel kupon oluşturma ve kanala gönderme."""
     log.info("Test komutu çalıştırıldı.")
     
-    # Komutu çalıştıran kişinin chat ID'sine yanıt ver
     await update.message.reply_text("Test başlatılıyor, lütfen bekleyin. Maçlar çekiliyor...")
     
     matches = await fetch_all_matches()
@@ -669,16 +637,14 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Maç bulunamadı.")
         return
         
-    # Sadece ilk 5 maçı al ve Canlı/Canlı değil farketmez
     test_matches = matches[:5]
     
     text = await build_coupon_text(test_matches, "🚨 TEST AI TAHMİN (MANUEL)", max_matches=5)
     
     if text:
-        # Komutu çalıştıran kişiye de gönderebiliriz
         await update.message.reply_text(text, parse_mode="HTML")
-        # Kanala da gönder (opsiyonel)
-        await send_to_channel(context.bot, text)
+        # Kanala göndermek istenirse aşağıdaki satırı kaldırın:
+        # await send_to_channel(context.bot, text)
     else:
         await update.message.reply_text("Kupon oluşturulamadı.")
 
@@ -686,28 +652,29 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     if not TELEGRAM_TOKEN:
         log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor.")
-        return
+        sys.exit(1)
     if not AI_KEY:
         log.error("AI_KEY ayarlı değil. Çıkılıyor.")
-        return
+        sys.exit(1)
         
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
     
-    # start job runner
     asyncio.create_task(job_runner(app))
     
-    log.info("v40.4 başlatıldı — job runner çalışıyor. Telegram polling başlatılıyor.")
+    log.info("v40.5 başlatıldı — job runner çalışıyor. Telegram polling başlatılıyor.")
     
-    # Polling'i başlat ve sonsuza kadar çalışmasını sağla
-    await app.run_polling()
+    # run_polling, botun ana döngüsüdür.
+    await app.run_polling(poll_interval=1.0)
 
 if __name__ == "__main__":
     try:
-        # Cleanup başlangıçta yapılır (Eğer dosya tabanlı bir state olsaydı)
         cleanup_posted_matches()
+        # asyncio.run() ana asenkron döngüyü yönetir.
         asyncio.run(main())
+        
     except KeyboardInterrupt:
         log.info("Durduruldu.")
     except Exception as e:
-        log.critical(f"Kritik hata: {e}")
+        log.critical(f"Kritik hata: {e}", exc_info=True)
+        sys.exit(1)
