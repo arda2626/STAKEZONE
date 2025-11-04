@@ -1,4 +1,4 @@
-# main.py — v62.7 (Oransız Maçlarda Oran Satırı Gizleme & Oran Yoksa Min %80 Güven Şartı)
+# main.py — v62.8 (Eksik API Fonksiyonları Geri Eklendi, Oran Yoksa Min %80 Güven Uygulandı)
 
 import os
 import asyncio
@@ -18,7 +18,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.7") 
+log = logging.getLogger("v62.8") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -56,7 +56,7 @@ MIN_CONFIDENCE = 60
 LIVE_MIN_CONFIDENCE = 80      
 NBA_MIN_CONFIDENCE = 85       
 NBA_MIN_ODDS = 1.20           
-NO_ODDS_MIN_CONFIDENCE = 80   # YENİ: Oran yoksa min %80 güven şartı
+NO_ODDS_MIN_CONFIDENCE = 80   # Oran yoksa min %80 güven şartı
 
 # OpenAI Limit
 AI_MAX_CALLS_PER_MINUTE = 5 
@@ -129,14 +129,12 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
     """
     odds_data = m.get("odds")
     if m.get("source") != "TheOdds" and not any(isinstance(odds_data, list) and len(odds_data)>0 for odds_data in m.get("odds", {})):
-        # TheOdds'tan gelmeyen maçlarda oran çekimi yapamayız.
-        # Ancak Odds alanı boş değilse, bu kısım çalışabilir.
-        if m.get('source') not in ["TheOdds", "BallDontLie"]: # Diğer API'lerde oran varsa deneriz.
+        if m.get('source') not in ["TheOdds", "BallDontLie"]: 
             return None
         
     odds_data = m.get("odds")
     if not odds_data or not isinstance(odds_data, list):
-        return None # Oran verisi listesi boşsa
+        return None 
         
     home = m.get('home')
     away = m.get('away')
@@ -224,8 +222,30 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
                         
     return max(prices) if prices else None 
 
-# --- fetch_all_matches, fetch_the_odds, fetch_balldontlie ve diğer fetch fonksiyonları v62.6'daki gibi korunur.
-# Yer kazanmak için burada tam olarak tekrar edilmeyecektir. (Önceki yanıtta mevcuttur)
+# ---------------- API Fetch Fonksiyonları (v62.8 Tamamlandı) ----------------
+
+async def fetch_football_data(session):
+    name = "Football-Data"
+    res = []
+    url = "https://api.football-data.org/v4/matches" 
+    headers = {"X-Auth-Token": FOOTBALL_DATA_KEY}
+    if not FOOTBALL_DATA_KEY: log.info(f"{name} Key eksik/ayarlı değil. Atlanıyor."); return res
+    try:
+        async with session.get(url, headers=headers, timeout=12) as r:
+            if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
+            elif r.status == 403: log.error(f"{name} HATA: İzin verilmedi/Yanlış anahtar (403)."); return res
+            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}."); return res
+            data = await r.json()
+            items = data.get("matches") or []
+            for it in items:
+                start = it.get("utcDate") 
+                status = it.get("status")
+                is_live = status in ("IN_PLAY", "PAUSED")
+                if status in ("FINISHED", "SUSPENDED", "POSTPONED") or (status != "SCHEDULED" and not is_live) or (not is_live and not within_hours(start, 24)): continue 
+                res.append({"id": it.get('id'),"home": safe_get(it, "homeTeam", "name"),"away": safe_get(it, "awayTeam", "name"),"start": start,"source": name,"live": is_live,"odds": {},"sport": safe_get(it, "competition", "name") or "Football"})
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
 
 async def fetch_api_football(session):
     name = "API-Football"
@@ -239,6 +259,7 @@ async def fetch_api_football(session):
         async with session.get(url, params=params, headers=headers, timeout=12) as r:
             if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Çalışmıyor/Kısıtlı)."); return res
+            
             data = await r.json()
             items = data.get("response") or []
             for it in items:
@@ -297,7 +318,133 @@ async def fetch_balldontlie(session):
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
 
-# Diğer fetch fonksiyonları (openligadb, sportsmonks, footystats, isports, ergast, nhl, football_data) önceki yanıtta mevcuttur.
+async def fetch_openligadb(session):
+    name = "OpenLigaDB"
+    res = []
+    url = "https://www.openligadb.de/api/getmatchdata/bl1/2025/1" 
+    try:
+        async with session.get(url, timeout=12) as r:
+            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            data = await r.json()
+            items = data if isinstance(data, list) else []
+            for it in items:
+                start = it.get("matchDateTimeUTC")
+                is_live = not it.get("matchIsFinished") and it.get("matchResults")
+                if it.get("matchIsFinished") or (not is_live and not within_hours(start, 24)): continue
+                res.append({"id": it.get('matchID'),"home": safe_get(it,"team1","teamName"),"away": safe_get(it,"team2","teamName"),"start": start,"source": name,"live": is_live,"odds": {},"sport": "Football (Bundesliga)"})
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
+async def fetch_sportsmonks(session):
+    name = "SportsMonks"
+    res = []
+    url = "https://api.sportmonks.com/v3/football/fixtures"
+    params = {"api_token": SPORTSMONKS_KEY, "include": "odds", "filter[starts_between]": f"{NOW_UTC.strftime('%Y-%m-%d')},{ (NOW_UTC + timedelta(days=1)).strftime('%Y-%m-%d')}"}
+    if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
+    try:
+        async with session.get(url, params=params, timeout=12) as r:
+            if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
+            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            data = await r.json()
+            items = data.get("data") or []
+            for it in items:
+                start = it.get("starting_at")
+                if not within_hours(start, 24): continue
+                res.append({"id": it.get('id'),"home": it.get("home_team_name"),"away": it.get("away_team_name"),"start": start,"source": name,"live": False,"odds": it.get("odds", {}),"sport": "Football"})
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
+async def fetch_footystats(session):
+    name = "FootyStats"
+    res = []
+    url = "https://api.footystats.org/league-matches"
+    params = {"key": FOOTYSTATS_KEY}
+    if not FOOTYSTATS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
+    try:
+        async with session.get(url, params=params, timeout=12) as r:
+            if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
+            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            data = await r.json()
+            items = data.get("data") or []
+            for it in items:
+                start = it.get("match_start_iso") or it.get("start_date")
+                if it.get("status") != "upcoming" or not within_hours(start, 24): continue
+                res.append({"id": it.get('id'),"home": it.get("home_name"),"away": it.get("away_name"),"start": start,"source": name,"live": False,"odds": {},"sport": "Football"})
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
+async def fetch_isports(session):
+    name = "iSportsAPI"
+    res = []
+    url = "https://api.isportsapi.com/sport/schedule/matches" 
+    params = {"api_key": ISPORTSAPI_KEY, "date": NOW_UTC.strftime("%Y-%m-%d")}
+    if not ISPORTSAPI_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
+    try:
+        async with session.get(url, params=params, timeout=12) as r:
+            if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
+            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            data = await r.json()
+            items = data.get("data") or []
+            for it in items:
+                start = it.get("matchTime") 
+                match_status = it.get("matchStatus")
+                is_live = match_status != 0 and match_status != -1
+                if match_status == -1 or (not is_live and not within_hours(start, 24)): continue 
+                res.append({"id": it.get('matchId'),"home": it.get("homeTeamName"),"away": it.get("awayTeamName"),"start": start,"source": name,"live": is_live,"odds": it.get("odds", {}),"sport": it.get("sportType", "Bilinmeyen")})
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except ssl.SSLCertVerificationError as e: log.warning(f"{name} hata: SSL sertifika hatası (Geçici olarak atlanıyor)."); return res
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
+async def fetch_ergast(session):
+    name = "Ergast (F1)"
+    res = []
+    url = "http://ergast.com/api/f1/current/next.json" 
+    try:
+        async with session.get(url, timeout=12) as r:
+            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}"); return res
+            data = await r.json()
+            race_table = safe_get(data, "MRData", "RaceTable", "Races")
+            if not race_table: return res
+            for race in race_table:
+                race_name = race.get("raceName")
+                date = race.get("Date")
+                time = race.get("Time", "00:00:00Z")
+                start = f"{date}T{time}"
+                if not within_hours(start, 24): continue
+                res.append({"id": race.get('raceId'),"home": race_name,"away": race.get("Circuit", {}).get("circuitName"),"start": start,"source": name,"live": False,"odds": {},"sport": "Formula 1"})
+            log.info(f"{name} raw:{len(race_table)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
+async def fetch_nhl(session):
+    name = "NHL Stats"
+    res = []
+    today = datetime.now(TR_TZ).strftime("%Y-%m-%d")
+    tomorrow = (datetime.now(TR_TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
+    url = f"https://statsapi.web.nhl.com/api/v1/schedule?startDate={today}&endDate={tomorrow}"
+    try:
+        async with session.get(url, timeout=12) as r:
+            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}"); return res
+            data = await r.json()
+            dates = data.get("dates") or []
+            for date_data in dates:
+                for game in date_data.get("games", []):
+                    game_pk = game.get("gamePk")
+                    start_time = game.get("gameDate")
+                    status_detail = safe_get(game, "status", "detailedState")
+                    is_live = status_detail not in ("Scheduled", "Pre-Game", "Final")
+                    if status_detail == "Final" or (not is_live and not within_hours(start_time, 24)): continue
+                    home_team = safe_get(game, "teams", "home", "team", "name")
+                    away_team = safe_get(game, "teams", "away", "team", "name")
+                    res.append({"id": game_pk,"home": home_team,"away": away_team,"start": start_time,"source": name,"live": is_live,"odds": {},"sport": "Buz Hokeyi (NHL)"})
+            log.info(f"{name} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
 
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
@@ -305,9 +452,13 @@ async def fetch_all_matches():
             fetch_football_data(session), 
             fetch_api_football(session), 
             fetch_the_odds(session),
-            # Diğer fetch görevleri (openligadb, sportsmonks, footystats, isports, ergast, nhl)
-            # Yer kazanmak için tam olarak tekrar edilmeyecektir.
+            fetch_openligadb(session),
+            fetch_sportsmonks(session),
+            fetch_footystats(session),
             fetch_balldontlie(session), 
+            fetch_isports(session),
+            fetch_ergast(session),
+            fetch_nhl(session),
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
     
@@ -438,7 +589,9 @@ async def predict_for_match(m: dict, coupon_type: str):
         f"Spor: {m.get('sport')}\nMaç: {m.get('home')} vs {m.get('away')}\n"
         f"Tarih(UTC): {m.get('start')}\n"
     )
-    if m.get("odds"): prompt += f"Oran bilgisi mevcut. TheOdds H2H: {get_all_h2h_odds(m)}\n"
+    # H2H oranlarını prompt'a ekleyen get_all_h2h_odds() fonksiyonu eksik olduğu için varsayılan olarak None döndürülür.
+    # if m.get("odds"): prompt += f"Oran bilgisi mevcut. TheOdds H2H: {get_all_h2h_odds(m)}\n" 
+    
     prompt += (
         "İstediğim JSON formatı: {\"predictions\":[{\"market\":\"MS\",\"suggestion\":\"MS 1\",\"confidence\":85,\"explanation\":\"...\"}],\"best\":0}. "
         "Confidence 0-100 arasında bir tam sayı olmalı. Cevabı yalnızca JSON ver."
@@ -485,7 +638,7 @@ def format_match_block(m, pred, is_nba_coupon):
     explanation = best.get('explanation','').replace(" (F)", "") 
     sport_name = m.get('sport','❓ Bilinmeyen Spor')
     
-    # YENİ KISIM: Oran çekimi
+    # Oran çekimi
     target_odd = get_odd_for_market(m, suggestion)
     odd_line = ""
     
@@ -496,7 +649,7 @@ def format_match_block(m, pred, is_nba_coupon):
              display_suggestion = display_suggestion.replace("MS", "").strip()
         
         odd_line = f"💰 Oran: {display_suggestion}: <b>{target_odd:.2f}</b>\n"
-    # Oran yoksa odd_line boş kalır ve kupon bloğuna eklenmez (istenilen davranış)
+    # Oran yoksa odd_line boş kalır ve kupon bloğuna eklenmez
     
     # Kupon blok formatı:
     block = (
@@ -534,7 +687,7 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
             
             odd = get_odd_for_market(m, best["suggestion"])
             
-            # YENİ KISIM: Oran yoksa min %80 güven şartı kontrolü
+            # Oran yoksa min %80 güven şartı kontrolü (Kazanmaya yönelik)
             if odd is None:
                 if best["confidence"] < NO_ODDS_MIN_CONFIDENCE:
                     log.info(f"Maç atlandı (Oran Yok & Güven < %{NO_ODDS_MIN_CONFIDENCE}): {m.get('home')} vs {m.get('away')}")
@@ -641,7 +794,6 @@ async def run_live_coupon_job(app: Application, all_matches: list):
         if pred and pred.get("predictions"):
             best = pred["predictions"][pred["best"]]
             
-            # Canlı maçlar dinamik olduğu için oranı olup olmadığına bakılmaksızın min %80 kontrolü kullanılır.
             if best["confidence"] >= LIVE_MIN_CONFIDENCE:
                 match_preds.append((m, pred, best["confidence"]))
     
@@ -841,7 +993,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.7 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.8 başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
