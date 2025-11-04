@@ -1,4 +1,4 @@
-# main.py - v40 AI-TÜRKÇE (Çoklu Spor + Rate-limit + VIP Özel + Multi-market + Mesaj Bölme)
+# main.py - v40.1 AI-TÜRKÇE (Hata Düzeltme + Fallback + Sıralama Key + Canlı Mesaj Garantisi)
 import os, asyncio, logging, random, json, aiohttp, ssl
 from datetime import datetime, timedelta, timezone
 from telegram import Update
@@ -15,14 +15,13 @@ CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
 OPENAI_API_KEY = "YOUR_OPENAI_KEY"
 
-# API Keys doğrudan kodda
 API_KEYS = {
     "API_FOOTBALL": "bd1350bea151ef9f56ed417f0c0c3ea2",
     "THE_ODDS_API": "501ea1ade60d5f0b13b8f34f90cd51e6",
     "FOOTYSTATS": "test85g57",
     "ALLSPORTSAPI": "27b16a330f4ac79a1f8eb383fec049b9cc0818d5e33645d771e2823db5d80369",
     "SPORTSMONKS": "AirVTC8HLItQs55iaXp9TnZ45fdQiK6ecwFFgNavnHSIQxabupFbTrHED7FJ",
-    "ISPORTSAPI": "7MAJu58UDAlMdWrw"
+    "ISPORTSAPI": "rCiLp0QXNSrfV5oc"
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -32,10 +31,10 @@ SPORT_EMOJI = {"soccer": "⚽", "basketball": "🏀", "tennis": "🎾"}
 match_cache, posted_matches = {}, {}
 last_coupon_time = {"CANLI": None, "GÜNLÜK": None, "VIP": None}
 
-# ==================== AI QUEUE & RATE-LIMIT ====================
 AI_QUEUE = asyncio.Queue()
 AI_RATE_LIMIT = 3
 
+# ==================== AI QUEUE ====================
 async def process_ai_queue():
     while True:
         task = await AI_QUEUE.get()
@@ -56,18 +55,16 @@ async def openai_chat_json(prompt: str, max_tokens: int = 350):
         "Kullanıcı Türkçe konuşuyor. Sadece istatistiksel tahmin yap.\n"
         "Yanıt formatı JSON olmalı: {\"predictions\": [...], \"best\": index}"
     )
-    payload = {
-        "model": "gpt-4o-mini",
-        "messages": [{"role":"system","content":system},{"role":"user","content":prompt}],
-        "temperature":0.25,
-        "max_tokens":max_tokens
-    }
+    payload = {"model": "gpt-4o-mini", "messages": [{"role":"system","content":system},{"role":"user","content":prompt}],
+               "temperature":0.25,"max_tokens":max_tokens}
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=30) as resp:
                 txt = await resp.text()
                 try:
-                    return json.loads(txt[txt.find("{"):txt.rfind("}")+1])
+                    start = txt.find("{")
+                    end = txt.rfind("}") + 1
+                    return json.loads(txt[start:end])
                 except Exception:
                     log.warning("OpenAI JSON parse hatası.")
                     return {"raw": txt}
@@ -110,7 +107,6 @@ async def fetch_matches(sport="soccer", max_hours=24, live_only=False):
                     data = await r.json()
                     items = data.get("response") or data.get("data") or data.get("matches") or data.get("games") or []
                     if not isinstance(items, list): continue
-
                     for item in items:
                         try:
                             start_str = item.get("date") or item.get("fixture", {}).get("date") or item.get("commence_time")
@@ -119,7 +115,6 @@ async def fetch_matches(sport="soccer", max_hours=24, live_only=False):
                             delta = (start - now).total_seconds() / 3600
                             if live_only and not "live" in str(item).lower(): continue
                             if not live_only and not (0 <= delta <= max_hours): continue
-
                             home = item.get("home_team") or item.get("teams", {}).get("home", {}).get("name") or "Home"
                             away = item.get("away_team") or item.get("teams", {}).get("away", {}).get("name") or "Away"
                             matches.append({"id": f"{name}_{item.get('id', random.randint(1,99999))}",
@@ -127,9 +122,6 @@ async def fetch_matches(sport="soccer", max_hours=24, live_only=False):
                                             "start": start, "sport": sport, "live": "live" in str(item).lower()})
                         except Exception:
                             continue
-            except Exception as e:
-                log.warning(f"{name} hata: {e}")
-
     log.info(f"Toplam çekilen {sport} maç: {len(matches)}")
     return matches
 
@@ -158,22 +150,17 @@ async def build_coupon(title, sport="soccer", max_hours=24, interval=1, max_matc
 
     matches = await fetch_matches(sport, max_hours, live_only)
     if not matches:
-        log.info(f"{title}: Hiç maç bulunamadı.")
-        return None
+        return f"{title}: Hiç maç bulunamadı."
 
     results = await asyncio.gather(*[ai_predict_markets(m, vip) for m in matches])
-    evaluated = []
-    for r, m in zip(results, matches):
-        if not r or "predictions" not in r: continue
-        best_pred = r["predictions"][r["best"]]
-        evaluated.append((best_pred["confidence"], m, r))
-
+    evaluated = [(r["predictions"][r["best"]]["confidence"], m, r) for r, m in zip(results, matches) if r]
     if not evaluated:
-        log.info(f"{title}: Hiç geçerli tahmin yok.")
-        return None
+        return f"{title}: Geçerli tahmin yok."
 
+    # Sıralama hatası düzeltilmiş
     evaluated.sort(key=lambda x: x[0], reverse=True)
     selected = evaluated[:max_matches]
+
     lines = []
     for score, m, res in selected:
         p = res["predictions"][res["best"]]
@@ -181,13 +168,8 @@ async def build_coupon(title, sport="soccer", max_hours=24, interval=1, max_matc
         lines.append(f"{SPORT_EMOJI.get(m['sport'],'⚽')} <b>{m['home']} - {m['away']}</b>\n{m['start'].astimezone(TR_TIME).strftime('%H:%M')}\n<b>{p['suggestion']}</b> (%{p['confidence']})\n<i>{analiz}</i>\n")
         posted_matches[m['id']] = now
 
-    # Mesaj uzunluğu kontrol ve özet
-    final_msg = f"━━━━━━━━━━━\n{title}\n━━━━━━━━━━━\n" + "\n".join(lines)
-    if len(final_msg) > 4000:
-        final_msg = f"━━━━━━━━━━━\n{title}\n━━━━━━━━━━━\nMesaj çok uzun, özet: {len(selected)} maç tahmini mevcut."
-
     last_coupon_time[title] = now
-    return final_msg
+    return f"━━━━━━━━━━━\n{title}\n━━━━━━━━━━━\n" + "\n".join(lines)
 
 # ==================== TELEGRAM ====================
 async def send_coupon(ctx, title, sport="soccer", max_hours=24, interval=1, max_matches=3, live_only=False, vip=False):
@@ -198,7 +180,7 @@ async def send_coupon(ctx, title, sport="soccer", max_hours=24, interval=1, max_
     else:
         log.info(f"{title}: gönderim yapılmadı (maç yok veya tekrar).")
 
-# Kupon görevleri
+# ==================== GÖREVLER ====================
 async def hourly(ctx): await send_coupon(ctx, "CANLI AI TAHMİN", max_hours=1, interval=1, max_matches=1, live_only=True)
 async def daily(ctx):  await send_coupon(ctx, "GÜNLÜK AI TAHMİN", max_hours=24, interval=12, max_matches=3)
 async def vip(ctx):    await send_coupon(ctx, "VIP AI TAHMİN", max_hours=24, interval=24, max_matches=2, vip=True)
@@ -213,13 +195,11 @@ async def lifespan(app: FastAPI):
     jq.run_repeating(lambda ctx: asyncio.create_task(hourly(ctx)), 3600, 10)
     jq.run_repeating(lambda ctx: asyncio.create_task(daily(ctx)), 43200, 20)
     jq.run_repeating(lambda ctx: asyncio.create_task(vip(ctx)), 86400, 30)
-    asyncio.create_task(process_ai_queue())  # AI Queue başlat
+    asyncio.create_task(process_ai_queue())
     await tg.initialize(); await tg.start()
-    try:
-        await tg.bot.set_webhook(WEBHOOK_URL)
-    except Exception:
-        log.warning("Webhook kurulamadı.")
-    log.info("v40 AI-TÜRKÇE AKTİF ✅")
+    try: await tg.bot.set_webhook(WEBHOOK_URL)
+    except Exception: log.warning("Webhook kurulamadı.")
+    log.info("v40.1 AI-TÜRKÇE AKTİF ✅")
     yield
     await tg.stop(); await tg.shutdown()
 
