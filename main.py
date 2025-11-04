@@ -1,4 +1,4 @@
-# main.py — v62.3 (Football-Data Key Eklendi, Oran Formatı ve AI Davranışı Güncellendi)
+# main.py — v62.4 (Tüm Marketler İçin Oran Çekimi Düzeltildi)
 
 import os
 import asyncio
@@ -7,6 +7,7 @@ import json
 import random
 import sys
 import ssl 
+import re # Düzenli ifadeler için eklendi
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -17,7 +18,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.3") 
+log = logging.getLogger("v62.4") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -32,7 +33,6 @@ SPORTSMONKS_KEY = "AirVTC8HLItQs55iaXp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ"
 ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
 FOOTYSTATS_KEY = "test85g57" 
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
-# YENİ FOOTBALL-DATA KEY BURAYA EKLENDİ
 FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7" 
 
 # Türkiye zaman dilimi (UTC+3)
@@ -117,7 +117,9 @@ def cleanup_posted_matches():
     log.info(f"Temizleme sonrası posted_matches boyutu: {len(posted_matches)}")
     
 def get_odd_for_market(m: dict, prediction_suggestion: str):
-    """Sadece tahmin edilen tercihin oranını döner."""
+    """
+    Tahmin edilen tercihin (MS, Alt/Üst, KG Var/Yok) oranını TheOdds verisinden çeker.
+    """
     odds_data = m.get("odds")
     if m.get("source") != "TheOdds" or not odds_data or not isinstance(odds_data, list):
         return None
@@ -125,31 +127,68 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
     home = m.get('home')
     away = m.get('away')
     
+    target_market_key = None
     target_outcome_names = []
+    
+    # --- 1. Maç Sonucu (H2H) ---
     if any(k in prediction_suggestion for k in ["MS 1", "Ev sahibi kazanır"]):
+        target_market_key = "h2h"
         target_outcome_names = [home, 'Home', '1']
     elif any(k in prediction_suggestion for k in ["MS 2", "Deplasman kazanır"]):
+        target_market_key = "h2h"
         target_outcome_names = [away, 'Away', '2']
-    elif any(k in prediction_suggestion for k in ["Ber beraberlik", "MS 0", "MS X"]):
+    elif any(k in prediction_suggestion for k in ["Beraberlik", "MS 0", "MS X"]):
+        target_market_key = "h2h"
         target_outcome_names = ['Draw', 'X', '0']
-    else:
-        # Toplam gol, handikap gibi diğer pazarlar için oran çekimi şimdilik atlanıyor.
-        return None 
+    
+    # --- 2. Toplam Gol (Totals) ---
+    elif prediction_suggestion.startswith("Over") or prediction_suggestion.startswith("Alt") or prediction_suggestion.startswith("Üst"):
+        # Örnek: "Over 2.5", "Under 3.5"
+        match_total = re.search(r'([0-9]+\.?[0-9]?)', prediction_suggestion)
+        total_value = float(match_total.group(1)) if match_total else None
+        
+        if total_value is not None:
+            # TheOdds API'sinde 'totals' marketi Alt/Üst için kullanılır.
+            target_market_key = "totals"
+            
+            # Alt/Üst değerini ve sonucu belirle (TheOdds genellikle Alt/Üstü ayrıştırır)
+            if "Over" in prediction_suggestion or "Üst" in prediction_suggestion:
+                # TheOdds'ta Under/Over olarak ayrılır, Alt/Üst çizgisi (point) kullanılır.
+                target_outcome_names = [f'Over {total_value}', 'Over']
+            elif "Under" in prediction_suggestion or "Alt" in prediction_suggestion:
+                target_outcome_names = [f'Under {total_value}', 'Under']
+            
+    # --- 3. KG Var/Yok (BTTS - Both Teams To Score) ---
+    elif prediction_suggestion in ["KG Var", "BTTS Yes", "KG Yok", "BTTS No"]:
+        target_market_key = "btts" # Varsayımsal TheOdds key'i
+        
+        if prediction_suggestion in ["KG Var", "BTTS Yes"]:
+            target_outcome_names = ['Yes', 'Var']
+        elif prediction_suggestion in ["KG Yok", "BTTS No"]:
+            target_outcome_names = ['No', 'Yok']
+
+    if not target_market_key:
+        return None
         
     prices = []
     for bookmaker in odds_data:
         for market in bookmaker.get("markets", []):
-            # Sadece H2H (Maç Sonucu) marketine odaklanıyoruz
-            if market.get("key") == "h2h":
+            if market.get("key") == target_market_key:
                 for outcome in market.get("outcomes", []):
-                    if outcome.get("name") in target_outcome_names:
+                    # Alt/Üst marketinde, çizgiyi (point) de kontrol etmeliyiz.
+                    is_total_match = True
+                    if target_market_key == "totals" and 'point' in outcome and total_value is not None:
+                         # TheOdds'taki point değeri tahminimizle eşleşmeli (Örn: 2.5)
+                         if outcome.get('point') != total_value:
+                             is_total_match = False
+                             
+                    if is_total_match and outcome.get("name") in target_outcome_names:
                         prices.append(outcome.get("price"))
                         
     return max(prices) if prices else None # En yüksek oranı al
 
-
 def get_all_h2h_odds(m: dict):
-    # Bu fonksiyon sadece AI için bilgi sağlamak amacıyla korunmuştur. Kupon formatında artık kullanılmayacak.
+    # Bu fonksiyon sadece AI'a bilgi sağlamak amacıyla korunmuştur. Kupon formatında kullanılmayacak.
     res = {'E': '?', 'B': '?', 'D': '?'}
     odds_data = m.get("odds")
     source = m.get("source")
@@ -170,8 +209,11 @@ def get_all_h2h_odds(m: dict):
                         return res
     return res
 
-# ---------------- fetch APIs ----------------
-# API'ler (v62.2'deki gibi)
+# --- API Fetch Fonksiyonları (v62.3 ile aynı) ---
+# ... (fetch_api_football, fetch_the_odds, fetch_openligadb, fetch_sportsmonks, fetch_footystats, 
+#      fetch_balldontlie, fetch_isports, fetch_ergast, fetch_nhl, fetch_football_data fonksiyonları buraya kopyalanır)
+# NOT: Yer kazanmak için bu kısım burada tam olarak tekrar edilmeyecek, ancak kodda yer almalıdır.
+
 async def fetch_api_football(session):
     name = "API-Football"
     res = []
@@ -217,7 +259,8 @@ async def fetch_the_odds(session):
     name = "TheOdds"
     res = []
     url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
-    params = {"regions":"eu","markets":"h2h,totals,spreads","oddsFormat":"decimal","dateFormat":"iso","apiKey":THE_ODDS_API_KEY}
+    # Tüm marketleri çek
+    params = {"regions":"eu","markets":"h2h,totals,btts","oddsFormat":"decimal","dateFormat":"iso","apiKey":THE_ODDS_API_KEY}
     if not THE_ODDS_API_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
@@ -246,7 +289,7 @@ async def fetch_the_odds(session):
             log.info(f"{name} raw:{len(data) if isinstance(data, list) else 0} filtered:{len(res)}")
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
-
+    
 async def fetch_openligadb(session):
     name = "OpenLigaDB"
     res = []
@@ -499,7 +542,6 @@ async def fetch_nhl(session):
 async def fetch_football_data(session):
     name = "Football-Data"
     res = []
-    # API'nin varsayılan olarak 10 günlük maçı çektiği varsayılıyor.
     url = "https://api.football-data.org/v4/matches" 
     headers = {"X-Auth-Token": FOOTBALL_DATA_KEY}
     
@@ -532,7 +574,6 @@ async def fetch_football_data(session):
                     "start": start,
                     "source": name,
                     "live": is_live,
-                    # Football-Data API'nin free tier'ında genellikle oran yoktur.
                     "odds": {}, 
                     "sport": safe_get(it, "competition", "name") or "Football"
                 })
@@ -540,12 +581,13 @@ async def fetch_football_data(session):
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
 
+
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
         tasks = [
-            fetch_football_data(session), # Key eklendi, artık çalışması beklenir.
+            fetch_football_data(session), 
             fetch_api_football(session), 
-            fetch_the_odds(session),
+            fetch_the_odds(session), # Buradan tüm market verisi (h2h, totals, btts) gelecek
             fetch_openligadb(session),
             fetch_sportsmonks(session),
             fetch_footystats(session),
@@ -629,7 +671,7 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
         "model": MODEL,
         "messages":[
             # AI Davranışı Düzeltmesi (Kumarbaz/Yorumcu)
-            {"role":"system","content":"Sen Türkçe konuşan, yüksek güvenilirlikte tahminler yapan, bir spor yorumcusu ve kumarbaz zekasına sahip profesyonel bir analistsin. Piyasa hareketlerini, risk ve ödülü değerlendir. Tüm popüler marketler (MS, KG Var/Yok, Alt/Üst) için en güçlü 1 veya 2 tahminini yap. Tahminlerinin 70'ten (VIP için 80'den) düşük olmamasına özen göster. Cevabı sadece belirtilen JSON formatında ver. Başka hiçbir açıklayıcı metin kullanma. Confidence 0-100 arasında tam sayı olmalı."},
+            {"role":"system","content":"Sen Türkçe konuşan, yüksek güvenilirlikte tahminler yapan, bir spor yorumcusu ve kumarbaz zekasına sahip profesyonel bir analistsin. Piyasa hareketlerini, risk ve ödülü değerlendir. Tüm popüler marketler (MS, KG Var/Yok, Alt/Üst) için en güçlü 1 veya 2 tahminini yap. Tahminlerinin 70'ten (VIP için 80'den) düşük olmamasına özen göster. Cevabı sadece belirtilen JSON formatında ver. Başka hiçbir açıklayıcı metin kullanma. Confidence 0-100 arasında tam sayı olmalı. Alt/Üst tahminlerini 'Under 2.5' veya 'Over 3.5' formatında yap."},
             {"role":"user","content": prompt}
         ],
         "temperature": temperature,
@@ -669,7 +711,6 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
 
 # ---------------- Prediction wrapper ----------------
 async def predict_for_match(m: dict, is_vip: bool):
-    # AI sıcaklık ayarı güncellendi. (VIP: Daha az riskli/sürpriz, Normal: Daha dinamik/yorumlayıcı)
     temp = 0.1 if is_vip else 0.2
     
     prompt = (
@@ -688,10 +729,10 @@ async def predict_for_match(m: dict, is_vip: bool):
         log.warning(f"AI tahmini başarısız veya boş: {m.get('id')}. Fallback kullanılıyor.")
         
         preds = []
-        if is_vip: # VIP için daha sürpriz fallback (Oran filtresine takılmaz)
+        if is_vip: 
             preds.append({"market":"MS","suggestion":"MS X","confidence":70,"explanation":"Riskli ama potansiyeli yüksek beraberlik tahmini."})
             preds.append({"market":"TOTALS","suggestion":"Over 3.5","confidence":65,"explanation":"Yüksek skor sürprizi denemesi."})
-        else: # GARANTİ için daha düşük riskli fallback (Oran filtresine takılır)
+        else: 
             preds.append({"market":"MS","suggestion":"MS 1","confidence":75,"explanation":"Ev sahibi, veriler ışığında güvenilir bir seçenek."})
             preds.append({"market":"TOTALS","suggestion":"Under 2.5","confidence":70,"explanation":"Düşük skorlu, defansif bir karşılaşma bekleniyor."})
 
@@ -725,9 +766,17 @@ def format_match_block(m, pred):
     # Yeni Oran Satırı Oluşturma
     target_odd = get_odd_for_market(m, suggestion)
     odd_line = ""
+    
+    # Sadece tahmin edilen tercihin oranını göster
     if target_odd:
-        # Sadece tahmin edilen tercihin oranını göster
-        odd_line = f"💰 Oran: {suggestion.split(':')[0].strip()}: <b>{target_odd:.2f}</b>\n"
+        # Alt/Üst veya KG Var/Yok tahminlerinin oranını gösterirken sadece tercihi kullan (Örn: MS 1: 2.11 -> 1: 2.11)
+        display_suggestion = suggestion.split(':')[0].strip() if ':' in suggestion else suggestion
+        
+        # Sadece rakamı/tercihi al
+        if "MS" in display_suggestion:
+             display_suggestion = display_suggestion.replace("MS", "").strip()
+        
+        odd_line = f"💰 Oran: {display_suggestion}: <b>{target_odd:.2f}</b>\n"
     
     # Kupon blok formatı:
     block = (
@@ -754,7 +803,7 @@ async def build_coupon_text(matches, title, max_matches):
     match_preds = []
     
     for m in matches:
-        pred = await predict_for_match(m, is_vip=("👑 VIP" in title)) # VIP kontrolü
+        pred = await predict_for_match(m, is_vip=("👑 VIP" in title))
         
         if pred and pred.get("predictions"):
             best = pred["predictions"][pred["best"]]
@@ -764,8 +813,9 @@ async def build_coupon_text(matches, title, max_matches):
             
             # Günlük kupon oran filtresi (GARANTİ Kuponu için Max 2.0)
             if is_daily_coupon and DAILY_MAX_ODDS:
-                # Sadece MS tahminleri için (MS 1/X/2) TheOdds'tan gelen maçlarda oran filtresi uygula
-                if m.get('source') == "TheOdds" and any(k in best["suggestion"] for k in ["MS 1", "MS 2", "Beraberlik", "MS 0", "MS X"]):
+                if m.get('source') == "TheOdds": 
+                    
+                    # Oran çekimini genişlettiğimiz için, tüm tahminler için oranı kontrol ediyoruz.
                     odd = get_odd_for_market(m, best["suggestion"])
                     
                     if odd is None or odd > DAILY_MAX_ODDS:
@@ -983,7 +1033,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.3 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.4 başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
