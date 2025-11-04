@@ -1,57 +1,173 @@
 # fetch_matches_free.py
 import aiohttp
 import logging
+import os
 from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-# Tek fonksiyon: tüm kaynakları dener
-async def fetch_all_matches():
-    urls = {
-        "theodds": "https://api.the-odds-api.com/v4/sports/soccer/odds/?regions=eu",
-        "apifootball": "https://v3.football.api-sports.io/fixtures?live=all",
-        "sportsmonks": "https://api.sportsmonks.com/v3/football/livescores",
-    }
+# Anahtarlar
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
+THE_ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY", "")
+FOOTYSTATS_KEY = os.getenv("FOOTYSTATS_KEY", "")
+ALLSPORTSAPI_KEY = os.getenv("ALLSPORTSAPI_KEY", "")
+SPORTSMONKS_KEY = os.getenv("SPORTSMONKS_KEY", "")
+ISPORTSAPI_KEY = os.getenv("ISPORTSAPI_KEY", "")
 
+# ===================================
+# TÜM MAÇLARI ÇEK
+# ===================================
+async def fetch_all_matches():
     all_matches = []
 
     async with aiohttp.ClientSession() as session:
-        for name, url in urls.items():
-            try:
-                async with session.get(url, timeout=10) as resp:
-                    data = await resp.json()
+        # ---------- API-FOOTBALL ----------
+        try:
+            url = "https://v3.football.api-sports.io/fixtures?live=all"
+            headers = {"x-apisports-key": API_FOOTBALL_KEY}
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                data = await resp.json()
+                fixtures = data.get("response", [])
+                for f in fixtures:
+                    fix = f.get("fixture", {})
+                    teams = f.get("teams", {})
+                    home = teams.get("home", {}).get("name", "Bilinmiyor")
+                    away = teams.get("away", {}).get("name", "Bilinmiyor")
+                    date = fix.get("date", datetime.utcnow().isoformat())
+                    all_matches.append({
+                        "id": fix.get("id", hash(f"{home}-{away}-{date}")),
+                        "home": home,
+                        "away": away,
+                        "date": date,
+                        "sport": "futbol",
+                        "live": fix.get("status", {}).get("short", "") not in ("NS", "FT"),
+                        "home_country": "Global",
+                        "away_country": "Global",
+                    })
+                log.info(f"✅ API-Football'dan {len(fixtures)} maç çekildi.")
+        except Exception as e:
+            log.warning(f"⚠️ API-Football hata: {e}")
 
-                    # Liste mi geldi sözlük mü kontrol et
-                    if isinstance(data, list):
-                        raw = data
-                    elif isinstance(data, dict):
-                        raw = data.get("data") or data.get("response") or []
-                    else:
-                        raw = []
-
-                    # Standart forma çevir
-                    for item in raw:
-                        match = {
-                            "id": item.get("id") or item.get("fixture", {}).get("id") or hash(str(item)),
-                            "home": item.get("home_team") or item.get("teams", {}).get("home", {}).get("name") or item.get("home") or "Bilinmiyor",
-                            "away": item.get("away_team") or item.get("teams", {}).get("away", {}).get("name") or item.get("away") or "Bilinmiyor",
-                            "date": item.get("date") or item.get("fixture", {}).get("date") or datetime.utcnow().isoformat(),
+        # ---------- THE ODDS API ----------
+        try:
+            url = f"https://api.the-odds-api.com/v4/sports/soccer/odds/?regions=eu&apiKey={THE_ODDS_API_KEY}"
+            async with session.get(url, timeout=10) as resp:
+                data = await resp.json()
+                if isinstance(data, list):
+                    for m in data:
+                        home = m.get("home_team", "Bilinmiyor")
+                        away = m.get("away_team", "Bilinmiyor")
+                        commence_time = m.get("commence_time", datetime.utcnow().isoformat())
+                        all_matches.append({
+                            "id": hash(str(m)),
+                            "home": home,
+                            "away": away,
+                            "date": commence_time,
                             "sport": "futbol",
-                            "live": "live" in str(item).lower() or item.get("live") is True,
-                            "home_country": "Türkiye",
-                            "away_country": "Türkiye",
-                        }
-                        all_matches.append(match)
+                            "live": False,
+                            "home_country": "Global",
+                            "away_country": "Global",
+                        })
+                    log.info(f"✅ The Odds API'den {len(data)} maç çekildi.")
+                else:
+                    log.warning("⚠️ The Odds API beklenmedik veri yapısı döndürdü.")
+        except Exception as e:
+            log.warning(f"⚠️ The Odds API hata: {e}")
 
-                    log.info(f"{name} API'den {len(raw)} maç alındı.")
-            except Exception as e:
-                log.warning(f"{name} API hata: {e}")
+        # ---------- FOOTYSTATS ----------
+        try:
+            url = f"https://api.footystats.org/live-scores?key={FOOTYSTATS_KEY}"
+            async with session.get(url, timeout=10) as resp:
+                data = await resp.json()
+                matches = data.get("data", [])
+                for m in matches:
+                    all_matches.append({
+                        "id": m.get("id", hash(m.get("home_name", ""))),
+                        "home": m.get("home_name", "Bilinmiyor"),
+                        "away": m.get("away_name", "Bilinmiyor"),
+                        "date": m.get("match_start_iso", datetime.utcnow().isoformat()),
+                        "sport": "futbol",
+                        "live": True,
+                        "home_country": m.get("country", "Global"),
+                        "away_country": m.get("country", "Global"),
+                    })
+                log.info(f"✅ FootyStats API'den {len(matches)} maç çekildi.")
+        except Exception as e:
+            log.warning(f"⚠️ FootyStats hata: {e}")
 
+        # ---------- ALLSPORTSAPI ----------
+        try:
+            url = f"https://allsportsapi2.p.rapidapi.com/api/football/matches/live"
+            headers = {
+                "x-rapidapi-host": "allsportsapi2.p.rapidapi.com",
+                "x-rapidapi-key": ALLSPORTSAPI_KEY
+            }
+            async with session.get(url, headers=headers, timeout=10) as resp:
+                data = await resp.json()
+                matches = data.get("result", [])
+                for m in matches:
+                    all_matches.append({
+                        "id": m.get("event_key", hash(m.get("event_home_team", ""))),
+                        "home": m.get("event_home_team", "Bilinmiyor"),
+                        "away": m.get("event_away_team", "Bilinmiyor"),
+                        "date": m.get("event_date_start", datetime.utcnow().isoformat()),
+                        "sport": "futbol",
+                        "live": True,
+                        "home_country": "Global",
+                        "away_country": "Global",
+                    })
+                log.info(f"✅ AllSportsAPI'den {len(matches)} maç çekildi.")
+        except Exception as e:
+            log.warning(f"⚠️ AllSportsAPI hata: {e}")
+
+        # ---------- SPORTSMONKS ----------
+        try:
+            url = f"https://api.sportsmonks.com/v3/football/livescores?api_token={SPORTSMONKS_KEY}"
+            async with session.get(url, timeout=10) as resp:
+                data = await resp.json()
+                matches = data.get("data", [])
+                for m in matches:
+                    home = m.get("home_name", "Bilinmiyor")
+                    away = m.get("away_name", "Bilinmiyor")
+                    all_matches.append({
+                        "id": m.get("id", hash(home+away)),
+                        "home": home,
+                        "away": away,
+                        "date": m.get("starting_at", datetime.utcnow().isoformat()),
+                        "sport": "futbol",
+                        "live": True,
+                        "home_country": "Global",
+                        "away_country": "Global",
+                    })
+                log.info(f"✅ SportsMonks'tan {len(matches)} maç çekildi.")
+        except Exception as e:
+            log.warning(f"⚠️ SportsMonks hata: {e}")
+
+        # ---------- iSPORTSAPI ----------
+        try:
+            url = f"https://api.isportsapi.com/sport/football/livescores?api_key={ISPORTSAPI_KEY}"
+            async with session.get(url, timeout=10, ssl=False) as resp:
+                data = await resp.json()
+                matches = data.get("data", [])
+                for m in matches:
+                    all_matches.append({
+                        "id": m.get("matchId", hash(str(m))),
+                        "home": m.get("homeTeamName", "Bilinmiyor"),
+                        "away": m.get("awayTeamName", "Bilinmiyor"),
+                        "date": m.get("matchTime", datetime.utcnow().isoformat()),
+                        "sport": "futbol",
+                        "live": True,
+                        "home_country": "Global",
+                        "away_country": "Global",
+                    })
+                log.info(f"✅ iSportsAPI'den {len(matches)} maç çekildi.")
+        except Exception as e:
+            log.warning(f"⚠️ iSportsAPI hata: {e}")
+
+    # ---------- SONUÇ ----------
     if not all_matches:
-        log.warning("Hiç maç alınamadı, dummy veri yükleniyor.")
-        all_matches = [
-            {"id": 1, "home": "Galatasaray", "away": "Fenerbahçe", "date": "2025-11-03T20:00:00Z", "sport": "futbol", "live": False},
-            {"id": 2, "home": "Real Madrid", "away": "Barcelona", "date": "2025-11-03T17:30:00Z", "sport": "futbol", "live": True},
-        ]
+        log.warning("❌ Hiçbir API veri döndürmedi — kanal gönderimi iptal.")
+        return None  # hiç maç yoksa bot mesaj göndermesin
 
+    log.info(f"🎯 Toplam çekilen maç: {len(all_matches)}")
     return all_matches
