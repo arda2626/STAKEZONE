@@ -1,4 +1,4 @@
-# main.py - v40 AI-TÜRKÇE (Multi-Market + Canlı Oran + Rate-limit + Mesaj Bölme + VIP)
+# main.py - v40 AI-TÜRKÇE (Tam Sürüm: Çoklu Spor + VIP + Rate-limit + Multi-market + Mesaj Bölme)
 import os, asyncio, logging, random, json, aiohttp, ssl
 from datetime import datetime, timedelta, timezone
 from telegram import Update
@@ -14,7 +14,6 @@ CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
 OPENAI_API_KEY = "YOUR_OPENAI_KEY"
 
-# API Keys doğrudan kodda
 API_KEYS = {
     "API_FOOTBALL": "bd1350bea151ef9f56ed417f0c0c3ea2",
     "THE_ODDS_API": "501ea1ade60d5f0b13b8f34f90cd51e6",
@@ -33,7 +32,7 @@ last_coupon_time = {"CANLI": None, "GÜNLÜK": None, "VIP": None}
 
 # ==================== AI QUEUE & RATE-LIMIT ====================
 AI_QUEUE = asyncio.Queue()
-AI_RATE_LIMIT = 3  # 3 requests per 20s
+AI_RATE_LIMIT = 3
 
 async def process_ai_queue():
     while True:
@@ -62,13 +61,13 @@ async def openai_chat_json(prompt: str, max_tokens: int = 350):
             async with session.post(url, json=payload, headers=headers, timeout=30) as resp:
                 txt = await resp.text()
                 try:
-                    return json.loads(txt[txt.find("{"):txt.rfind("}")+1])
+                    return json.loads(txt[txt.find("{"):txt.rfind("}")+1)
                 except Exception:
                     log.warning("OpenAI JSON parse hatası.")
-                    return {"raw": txt}
+                    return {"predictions":[{"market":"MS","suggestion":"MS 1","confidence":50,"explanation":"Fallback"}], "best":0}
     except Exception as e:
         log.error(f"OpenAI hatası: {e}")
-        return None
+        return {"predictions":[{"market":"MS","suggestion":"MS 1","confidence":50,"explanation":"Fallback"}], "best":0}
 
 # ==================== MAÇ ÇEKME ====================
 async def fetch_matches(sport="soccer", max_hours=24, live_only=False):
@@ -117,16 +116,9 @@ async def fetch_matches(sport="soccer", max_hours=24, live_only=False):
 
                             home = item.get("home_team") or item.get("teams", {}).get("home", {}).get("name") or "Home"
                             away = item.get("away_team") or item.get("teams", {}).get("away", {}).get("name") or "Away"
-
-                            # Canlı oran ekleme (varsa)
-                            odds = {}
-                            if name in ["API-Football", "The Odds API"]:
-                                odds = {"MS1": item.get("odds_home"), "MSX": item.get("odds_draw"), "MS2": item.get("odds_away")}
-
                             matches.append({"id": f"{name}_{item.get('id', random.randint(1,99999))}",
                                             "source": name, "home": home, "away": away,
-                                            "start": start, "sport": sport, "live": "live" in str(item).lower(),
-                                            "odds": odds})
+                                            "start": start, "sport": sport, "live": "live" in str(item).lower()})
                         except Exception:
                             continue
             except Exception as e:
@@ -142,6 +134,7 @@ async def ai_predict_markets(match, vip=False):
     prompt = f"{home} vs {away}\nEv formu:{stats['home']['form']} Gol ort:{stats['home']['goals_avg']}\nDeplasman formu:{stats['away']['form']} Gol ort:{stats['away']['goals_avg']}"
     if vip:
         prompt += "\nVIP kupon için detaylı analiz yap."
+
     fut = asyncio.get_event_loop().create_future()
     async def task():
         resp = await openai_chat_json(prompt)
@@ -149,12 +142,10 @@ async def ai_predict_markets(match, vip=False):
     await AI_QUEUE.put(task)
     result = await fut
     if not result or "predictions" not in result:
-        return {"predictions": [{"market":"MS","suggestion":"MS 1","confidence":70,"explanation":"Ev avantajı."}], "best":0}
+        return {"predictions":[{"market":"MS","suggestion":"MS 1","confidence":50,"explanation":"Fallback"}], "best":0}
     return result
 
 # ==================== KUPON OLUŞTURMA ====================
-MAX_MESSAGE_LENGTH = 3900
-
 async def build_coupon(title, sport="soccer", max_hours=24, interval=1, max_matches=3, live_only=False, vip=False):
     now = datetime.now(TR_TIME)
     if last_coupon_time.get(title) and (now - last_coupon_time[title]).total_seconds() < interval*3600:
@@ -171,37 +162,39 @@ async def build_coupon(title, sport="soccer", max_hours=24, interval=1, max_matc
         log.info(f"{title}: Hiç geçerli tahmin yok.")
         return None
 
-    evaluated.sort(reverse=True)
+    evaluated.sort(key=lambda x: x[0], reverse=True)
     selected = evaluated[:max_matches]
-
-    # Mesaj oluşturma
-    lines, msg_blocks = [], []
+    lines = []
     for score, m, res in selected:
         p = res["predictions"][res["best"]]
         analiz = await ai_turkce_analiz(f"{m['home']} vs {m['away']} için {p['suggestion']}")
-        odds_str = " ".join([f"{k}({v})" for k,v in m.get("odds",{}).items() if v])
-        line = f"{SPORT_EMOJI.get(m['sport'],'⚽')} <b>{m['home']} - {m['away']}</b>\n{m['start'].astimezone(TR_TIME).strftime('%H:%M')}\n<b>{p['suggestion']}</b> (%{p['confidence']}) {odds_str}\n<i>{analiz}</i>\n"
+        markets = ", ".join([f"{pr['market']}:{pr['suggestion']}(%{pr['confidence']})" for pr in res["predictions"]])
+        line = f"{SPORT_EMOJI.get(m['sport'],'⚽')} <b>{m['home']} - {m['away']}</b>\n{m['start'].astimezone(TR_TIME).strftime('%H:%M')}\n<b>{p['suggestion']}</b> (%{p['confidence']})\n<i>{analiz}</i>\n<code>{markets}</code>\n"
         lines.append(line)
         posted_matches[m['id']] = now
 
-    # Mesaj bölme
-    current_msg = f"━━━━━━━━━━━\n{title}\n━━━━━━━━━━━\n"
+    # Mesaj bölme ve özet
+    MAX_LEN = 4000
+    message_blocks = []
+    current_block = ""
     for l in lines:
-        if len(current_msg) + len(l) > MAX_MESSAGE_LENGTH:
-            msg_blocks.append(current_msg)
-            current_msg = ""
-        current_msg += l
-    msg_blocks.append(current_msg)
+        if len(current_block)+len(l) > MAX_LEN:
+            message_blocks.append(current_block)
+            current_block = ""
+        current_block += l
+    if current_block:
+        message_blocks.append(current_block)
+
     last_coupon_time[title] = now
-    return msg_blocks
+    return message_blocks
 
 # ==================== TELEGRAM ====================
 async def send_coupon(ctx, title, sport="soccer", max_hours=24, interval=1, max_matches=3, live_only=False, vip=False):
-    msg_blocks = await build_coupon(title, sport, max_hours, interval, max_matches, live_only, vip)
-    if msg_blocks:
-        for block in msg_blocks:
-            await ctx.bot.send_message(CHANNEL_ID, block, parse_mode="HTML", disable_web_page_preview=True)
-        log.info(f"{title} gönderildi ({len(msg_blocks)} blok).")
+    blocks = await build_coupon(title, sport, max_hours, interval, max_matches, live_only, vip)
+    if blocks:
+        for txt in blocks:
+            await ctx.bot.send_message(CHANNEL_ID, txt, parse_mode="HTML", disable_web_page_preview=True)
+        log.info(f"{title} gönderildi ({len(blocks)} mesaj).")
     else:
         log.info(f"{title}: gönderim yapılmadı (maç yok veya tekrar).")
 
@@ -220,7 +213,7 @@ async def lifespan(app: FastAPI):
     jq.run_repeating(lambda ctx: asyncio.create_task(hourly(ctx)), 3600, 10)
     jq.run_repeating(lambda ctx: asyncio.create_task(daily(ctx)), 43200, 20)
     jq.run_repeating(lambda ctx: asyncio.create_task(vip(ctx)), 86400, 30)
-    asyncio.create_task(process_ai_queue())  # AI Queue başlat
+    asyncio.create_task(process_ai_queue())
     await tg.initialize(); await tg.start()
     try:
         await tg.bot.set_webhook(WEBHOOK_URL)
