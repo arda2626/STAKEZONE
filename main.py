@@ -1,4 +1,4 @@
-# main.py - v40.1 AI-TÜRKÇE (Hata Düzeltme + Fallback + Sıralama Key + Canlı Mesaj Garantisi)
+# main.py - v40.2 AI-TÜRKÇE (Çoklu Spor + Rate-limit + VIP + Hata düzeltme)
 import os, asyncio, logging, random, json, aiohttp, ssl
 from datetime import datetime, timedelta, timezone
 from telegram import Update
@@ -10,10 +10,10 @@ from ai_turkce import ai_turkce_analiz
 # ==================== CONFIG ====================
 TR_TIME = timezone(timedelta(hours=3))
 
-TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
+TELEGRAM_TOKEN = "REPLACE_ME"
 CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
-OPENAI_API_KEY = "YOUR_OPENAI_KEY"
+OPENAI_API_KEY = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 
 API_KEYS = {
     "API_FOOTBALL": "bd1350bea151ef9f56ed417f0c0c3ea2",
@@ -26,8 +26,8 @@ API_KEYS = {
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
-
 SPORT_EMOJI = {"soccer": "⚽", "basketball": "🏀", "tennis": "🎾"}
+
 match_cache, posted_matches = {}, {}
 last_coupon_time = {"CANLI": None, "GÜNLÜK": None, "VIP": None}
 
@@ -62,9 +62,7 @@ async def openai_chat_json(prompt: str, max_tokens: int = 350):
             async with session.post(url, json=payload, headers=headers, timeout=30) as resp:
                 txt = await resp.text()
                 try:
-                    start = txt.find("{")
-                    end = txt.rfind("}") + 1
-                    return json.loads(txt[start:end])
+                    return json.loads(txt[txt.find("{"):txt.rfind("}")+1])
                 except Exception:
                     log.warning("OpenAI JSON parse hatası.")
                     return {"raw": txt}
@@ -122,6 +120,9 @@ async def fetch_matches(sport="soccer", max_hours=24, live_only=False):
                                             "start": start, "sport": sport, "live": "live" in str(item).lower()})
                         except Exception:
                             continue
+            except Exception as e:
+                log.warning(f"{name} API çağrısı hatası: {e}")
+
     log.info(f"Toplam çekilen {sport} maç: {len(matches)}")
     return matches
 
@@ -150,17 +151,22 @@ async def build_coupon(title, sport="soccer", max_hours=24, interval=1, max_matc
 
     matches = await fetch_matches(sport, max_hours, live_only)
     if not matches:
-        return f"{title}: Hiç maç bulunamadı."
+        log.info(f"{title}: Hiç maç bulunamadı.")
+        return None
 
     results = await asyncio.gather(*[ai_predict_markets(m, vip) for m in matches])
-    evaluated = [(r["predictions"][r["best"]]["confidence"], m, r) for r, m in zip(results, matches) if r]
+    evaluated = []
+    for r, m in zip(results, matches):
+        if r:
+            p = r["predictions"][r["best"]]
+            evaluated.append((p["confidence"], m, r))
+
     if not evaluated:
-        return f"{title}: Geçerli tahmin yok."
+        log.info(f"{title}: Hiç geçerli tahmin yok.")
+        return None
 
-    # Sıralama hatası düzeltilmiş
-    evaluated.sort(key=lambda x: x[0], reverse=True)
+    evaluated.sort(reverse=True, key=lambda x: x[0])
     selected = evaluated[:max_matches]
-
     lines = []
     for score, m, res in selected:
         p = res["predictions"][res["best"]]
@@ -180,7 +186,6 @@ async def send_coupon(ctx, title, sport="soccer", max_hours=24, interval=1, max_
     else:
         log.info(f"{title}: gönderim yapılmadı (maç yok veya tekrar).")
 
-# ==================== GÖREVLER ====================
 async def hourly(ctx): await send_coupon(ctx, "CANLI AI TAHMİN", max_hours=1, interval=1, max_matches=1, live_only=True)
 async def daily(ctx):  await send_coupon(ctx, "GÜNLÜK AI TAHMİN", max_hours=24, interval=12, max_matches=3)
 async def vip(ctx):    await send_coupon(ctx, "VIP AI TAHMİN", max_hours=24, interval=24, max_matches=2, vip=True)
@@ -197,9 +202,11 @@ async def lifespan(app: FastAPI):
     jq.run_repeating(lambda ctx: asyncio.create_task(vip(ctx)), 86400, 30)
     asyncio.create_task(process_ai_queue())
     await tg.initialize(); await tg.start()
-    try: await tg.bot.set_webhook(WEBHOOK_URL)
-    except Exception: log.warning("Webhook kurulamadı.")
-    log.info("v40.1 AI-TÜRKÇE AKTİF ✅")
+    try:
+        await tg.bot.set_webhook(WEBHOOK_URL)
+    except Exception:
+        log.warning("Webhook kurulamadı.")
+    log.info("v40.2 AI-TÜRKÇE AKTİF ✅")
     yield
     await tg.stop(); await tg.shutdown()
 
