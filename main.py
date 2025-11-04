@@ -1,4 +1,4 @@
-# main.py — v61.2 (Kesin Hata Giderme)
+# main.py — v61.3 (Syntax Error Fix)
 
 import os
 import asyncio
@@ -15,7 +15,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v61.2") 
+log = logging.getLogger("v61.3") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -476,7 +476,8 @@ async def fetch_balldontlie(session):
                 res.append({
                     "id": it.get('id'),
                     "home": safe_get(it,"home_team","full_name") or "Home",
-                    "away": safe_get(it,"visitor_team","full_name") or "Away"),
+                    # Hata giderildi: Fazla parantez kaldırıldı.
+                    "away": safe_get(it,"visitor_team","full_name") or "Away", 
                     "start": full_start,
                     "source": name,
                     "live": False,
@@ -527,7 +528,6 @@ async def fetch_footballdata(session):
 # ---------------- FETCH ALL MATCHES ----------------
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
-        # Tüm fetch_ fonksiyonları artık global kapsamda tanımlı olduğundan hata vermeyecektir.
         tasks = [
             fetch_api_football(session),
             fetch_the_odds(session),
@@ -743,7 +743,11 @@ async def build_coupon_text(matches, title, max_matches):
             continue
             
         lines.append(format_match_block(m, pred))
-        posted_matches[match_id] = now
+            
+        # Maç yayınlanmadan önce tekrar yayınlanmasını önlemek için id'yi kaydedin.
+        if "TEST" not in title: 
+             posted_matches[match_id] = now
+             
         count += 1
             
     if not lines: return None
@@ -854,7 +858,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v61.2 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v61.3 başlatıldı. Telegram polling başlatılıyor...")
     
     app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES)
 
