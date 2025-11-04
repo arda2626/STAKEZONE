@@ -6,26 +6,27 @@ from datetime import datetime
 
 log = logging.getLogger(__name__)
 
-# Anahtarlar
+# =================== API KEYS ===================
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "")
 THE_ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY", "")
 FOOTYSTATS_KEY = os.getenv("FOOTYSTATS_KEY", "")
 ALLSPORTSAPI_KEY = os.getenv("ALLSPORTSAPI_KEY", "")
 SPORTSMONKS_KEY = os.getenv("SPORTSMONKS_KEY", "")
-ISPORTSAPI_KEY = os.getenv("ISPORTSAPI_KEY", "")
+ISPORTSAPI_KEY = os.getenv("ISPORTSAPI_KEY", "rCiLp0QXNSrfV5oc")  # güncel key
 
 # ===================================
-# TÜM MAÇLARI ÇEK
+# TÜM MAÇLARI ÇEK (Opsiyonel live_only parametresi)
 # ===================================
-async def fetch_all_matches():
+async def fetch_all_matches(live_only=True):
     all_matches = []
 
     async with aiohttp.ClientSession() as session:
         # ---------- API-FOOTBALL ----------
         try:
-            url = "https://v3.football.api-sports.io/fixtures?live=all"
+            url = "https://v3.football.api-sports.io/fixtures"
+            params = {"live": "all"} if live_only else {}
             headers = {"x-apisports-key": API_FOOTBALL_KEY}
-            async with session.get(url, headers=headers, timeout=10) as resp:
+            async with session.get(url, headers=headers, params=params, timeout=10) as resp:
                 data = await resp.json()
                 fixtures = data.get("response", [])
                 for f in fixtures:
@@ -34,13 +35,16 @@ async def fetch_all_matches():
                     home = teams.get("home", {}).get("name", "Bilinmiyor")
                     away = teams.get("away", {}).get("name", "Bilinmiyor")
                     date = fix.get("date", datetime.utcnow().isoformat())
+                    is_live = fix.get("status", {}).get("short", "") not in ("NS", "FT")
+                    if live_only and not is_live:
+                        continue
                     all_matches.append({
                         "id": fix.get("id", hash(f"{home}-{away}-{date}")),
                         "home": home,
                         "away": away,
                         "date": date,
                         "sport": "futbol",
-                        "live": fix.get("status", {}).get("short", "") not in ("NS", "FT"),
+                        "live": is_live,
                         "home_country": "Global",
                         "away_country": "Global",
                     })
@@ -48,21 +52,18 @@ async def fetch_all_matches():
         except Exception as e:
             log.warning(f"⚠️ API-Football hata: {e}")
 
-        # ---------- THE ODDS API ----------
+        # ---------- The Odds API ----------
         try:
             url = f"https://api.the-odds-api.com/v4/sports/soccer/odds/?regions=eu&apiKey={THE_ODDS_API_KEY}"
             async with session.get(url, timeout=10) as resp:
                 data = await resp.json()
                 if isinstance(data, list):
                     for m in data:
-                        home = m.get("home_team", "Bilinmiyor")
-                        away = m.get("away_team", "Bilinmiyor")
-                        commence_time = m.get("commence_time", datetime.utcnow().isoformat())
                         all_matches.append({
                             "id": hash(str(m)),
-                            "home": home,
-                            "away": away,
-                            "date": commence_time,
+                            "home": m.get("home_team", "Bilinmiyor"),
+                            "away": m.get("away_team", "Bilinmiyor"),
+                            "date": m.get("commence_time", datetime.utcnow().isoformat()),
                             "sport": "futbol",
                             "live": False,
                             "home_country": "Global",
@@ -74,7 +75,7 @@ async def fetch_all_matches():
         except Exception as e:
             log.warning(f"⚠️ The Odds API hata: {e}")
 
-        # ---------- FOOTYSTATS ----------
+        # ---------- FootyStats ----------
         try:
             url = f"https://api.footystats.org/live-scores?key={FOOTYSTATS_KEY}"
             async with session.get(url, timeout=10) as resp:
@@ -95,7 +96,7 @@ async def fetch_all_matches():
         except Exception as e:
             log.warning(f"⚠️ FootyStats hata: {e}")
 
-        # ---------- ALLSPORTSAPI ----------
+        # ---------- AllSportsAPI ----------
         try:
             url = f"https://allsportsapi2.p.rapidapi.com/api/football/matches/live"
             headers = {
@@ -120,7 +121,7 @@ async def fetch_all_matches():
         except Exception as e:
             log.warning(f"⚠️ AllSportsAPI hata: {e}")
 
-        # ---------- SPORTSMONKS ----------
+        # ---------- SportsMonks ----------
         try:
             url = f"https://api.sportsmonks.com/v3/football/livescores?api_token={SPORTSMONKS_KEY}"
             async with session.get(url, timeout=10) as resp:
@@ -143,13 +144,15 @@ async def fetch_all_matches():
         except Exception as e:
             log.warning(f"⚠️ SportsMonks hata: {e}")
 
-        # ---------- iSPORTSAPI ----------
+        # ---------- iSportsAPI ----------
         try:
             url = f"https://api.isportsapi.com/sport/football/livescores?api_key={ISPORTSAPI_KEY}"
             async with session.get(url, timeout=10, ssl=False) as resp:
                 data = await resp.json()
                 matches = data.get("data", [])
                 for m in matches:
+                    if live_only and not m.get("is_live", True):
+                        continue
                     all_matches.append({
                         "id": m.get("matchId", hash(str(m))),
                         "home": m.get("homeTeamName", "Bilinmiyor"),
@@ -167,7 +170,7 @@ async def fetch_all_matches():
     # ---------- SONUÇ ----------
     if not all_matches:
         log.warning("❌ Hiçbir API veri döndürmedi — kanal gönderimi iptal.")
-        return None  # hiç maç yoksa bot mesaj göndermesin
+        return None
 
     log.info(f"🎯 Toplam çekilen maç: {len(all_matches)}")
     return all_matches
