@@ -10,7 +10,7 @@ from ai_turkce import ai_turkce_analiz
 # ==================== CONFIG ====================
 TR_TIME = timezone(timedelta(hours=3))
 
-TELEGRAM_TOKEN = "REPLACE_ME"
+TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
 OPENAI_API_KEY = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
