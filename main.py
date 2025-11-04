@@ -291,7 +291,7 @@ async def ai_predict_markets(match, session):
     else:
         return {"predictions": [{"market":"INFO","suggestion":"AI yanıt parse edilemedi","confidence":50,"explanation":str(ai_resp)}], "best":0}
 
-# ========== Build coupon -> artık 'AI TAHMİN/ANALİZ' ==========
+## ========== Build coupon -> artık 'AI TAHMİN/ANALİZ' ==========
 async def build_coupon(title, max_hours, interval, max_matches, live_only=False):
     now = datetime.now(TR_TIME)
     last = last_coupon_time.get(title)
@@ -325,9 +325,6 @@ async def build_coupon(title, max_hours, interval, max_matches, live_only=False)
     selected = evaluated[:max_matches]
 
     lines = []
-    async def build_coupon(title, max_hours, interval, max_matches, live_only=False):
-    # ... (senin mevcut kodun devamı burada)
-    
     for score, m, preds, best in selected:
         emoji = SPORT_EMOJI.get(m.get("sport", "soccer"), "🏟️")
         status = "CANLI" if m.get("live") else m["start"].astimezone(TR_TIME).strftime("%d %b %H:%M")
@@ -354,7 +351,7 @@ async def build_coupon(title, max_hours, interval, max_matches, live_only=False)
             f"{status}\n"
             f"{best_line}"
             f"{other_lines}"
-            f"🧠 <i>{analiz}</i>\n"   # 🔹 AI analizi eklendi
+            f"🧠 <i>{analiz}</i>\n"
         )
 
         lines.append(block)
@@ -364,7 +361,6 @@ async def build_coupon(title, max_hours, interval, max_matches, live_only=False)
     header = f"━━━━━━━━━━━━━━━━━━━━━━\n    {title}\n━━━━━━━━━━━━━━━━━━━━━━\n"
     footer = "\n━━━━━━━━━━━━━━━━━━━━━━\nBu metin AI tarafından üretilmiştir. Tahminler istatistiksel analiz amaçlıdır; doğrudan bahis tavsiyesi sayılmaz."
     return header + "\n\n".join(lines) + footer
-
 # ========== Gönderim fonksiyonları ==========
 async def send_coupon(ctx, title, max_hours, interval, max_matches, live_only=False):
     text = await build_coupon(title, max_hours, interval, max_matches, live_only)
