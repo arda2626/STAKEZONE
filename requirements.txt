@@ -11,3 +11,4 @@ uvicorn[standard]==0.23.2
 
 # ================== Diğer (opsiyonel) ==================
 python-dotenv==1.0.1
+openai>=1.40.0
