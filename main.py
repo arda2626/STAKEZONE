@@ -1,4 +1,4 @@
-# main.py — v62.8 (Eksik API Fonksiyonları Geri Eklendi, Oran Yoksa Min %80 Güven Uygulandı)
+# main.py — v62.9 (Anlık Analiz - Instant Analysis Eklendi)
 
 import os
 import asyncio
@@ -18,7 +18,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.8") 
+log = logging.getLogger("v62.9") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -28,7 +28,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # API keyler
 API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2" 
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771" 
-SPORTSMONKS_KEY = "AirVTC8HLItQs55iaXp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ"
+SPORTSMONKS_KEY = "AirVTC8HLItQs55iaPnxp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ"
 ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
 FOOTYSTATS_KEY = "test85g57" 
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
@@ -42,7 +42,13 @@ NOW_UTC = datetime.now(timezone.utc)
 VIP_INTERVAL_HOURS = 3        
 DAILY_INTERVAL_HOURS = 12     
 LIVE_INTERVAL_HOURS = 1       
-NBA_INTERVAL_HOURS = 24       
+NBA_INTERVAL_HOURS = 24    
+
+# Yeni Anlık Analiz Ayarları
+INSTANT_ANALYSIS_INTERVAL_MINUTES = 20 # 20 dakikada bir kontrol
+INSTANT_ANALYSIS_MIN_CONFIDENCE = 75 # Minimum %75 kazanma ihtimali
+INSTANT_ANALYSIS_MAX_ODDS = 10.0 # Oran sınırlaması yok, ancak çok ekstrem oranlar filtrelenebilir.
+INSTANT_ANALYSIS_COOLDOWN_MINUTES = 120 # Bir maç tekrar denenmeden önce bekleme süresi
 
 LIVE_STAGGER_INTERVAL_MINUTES = 20 
 
@@ -63,7 +69,8 @@ AI_MAX_CALLS_PER_MINUTE = 5
 
 # state
 posted_matches = {}
-last_run = {"DAILY": None, "VIP": None, "LIVE": None, "NBA": None} 
+# Buraya 'INSTANT' eklendi
+last_run = {"DAILY": None, "VIP": None, "LIVE": None, "NBA": None, "INSTANT": None, "LAST_COUPON_POSTED": None} 
 ai_rate_limit = {"calls": 0, "reset": NOW_UTC} 
 
 # LİG VE SPOR MODERNİZASYON MAPPING'İ 
@@ -120,7 +127,8 @@ def safe_get(d, *keys):
 def cleanup_posted_matches():
     global posted_matches
     now = datetime.now(timezone.utc)
-    posted_matches = {mid: dt for mid, dt in posted_matches.items() if (now - dt).total_seconds() < 24*3600}
+    # INSTANT kuponlar için tekrar denemeye izin vermek amacıyla 2 saat (120 dakika) olarak güncellendi.
+    posted_matches = {mid: dt for mid, dt in posted_matches.items() if (now - dt).total_seconds() < INSTANT_ANALYSIS_COOLDOWN_MINUTES * 60}
     log.info(f"Temizleme sonrası posted_matches boyutu: {len(posted_matches)}")
     
 def get_odd_for_market(m: dict, prediction_suggestion: str):
@@ -210,11 +218,23 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
                         is_match = True
                     
                     if target_market_key == "totals" and total_value is not None:
-                         if outcome.get('point') != total_value:
+                         # TheOdds bazen 'point' alanını dize olarak döndürür
+                         outcome_point = outcome.get('point')
+                         if isinstance(outcome_point, str):
+                            try: outcome_point = float(outcome_point)
+                            except: outcome_point = None
+                            
+                         if outcome_point != total_value:
                              is_match = False
                     
                     if target_market_key == "spreads" and point_value is not None:
-                         if outcome.get('point') != point_value:
+                         # TheOdds bazen 'point' alanını dize olarak döndürür
+                         outcome_point = outcome.get('point')
+                         if isinstance(outcome_point, str):
+                            try: outcome_point = float(outcome_point)
+                            except: outcome_point = None
+
+                         if outcome_point != point_value:
                              is_match = False
 
                     if is_match and outcome.get("price") is not None:
@@ -277,7 +297,7 @@ async def fetch_the_odds(session):
     name = "TheOdds"
     res = []
     url = "https://api.the-odds-api.com/v4/sports/upcoming/odds" 
-    params = {"regions":"eu","markets":"h2h,totals,btts,spreads","oddsFormat":"decimal","dateFormat":"iso","apiKey":THE_ODDS_API_KEY, "sports": "basketball_nba,soccer"}
+    params = {"regions":"eu","markets":"h2h,totals,btts,spreads","oddsFormat":"decimal","dateFormat":"iso","apiKey":THE_ODDS_API_KEY, "sports": "basketball_nba,soccer,icehockey_nhl"} # NHL eklendi
     if not THE_ODDS_API_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
@@ -311,6 +331,7 @@ async def fetch_balldontlie(session):
                 match_date = it.get("date")
                 is_live = start_status not in ("Pre Game", "Final") 
                 if start_status == "Final": continue
+                # NBA maçları için bir varsayılan başlama saati ekleniyor (UTC 18:00)
                 full_start = f"{match_date.split('T')[0]}T18:00:00Z" 
                 if not is_live and not within_hours(full_start, 48): continue
                 res.append({"id": it.get('id'),"home": safe_get(it,"home_team","full_name") or "Home","away": safe_get(it,"visitor_team","full_name") or "Away","start": full_start,"source": name,"live": is_live,"odds": {},"sport": "basketball_nba"})
@@ -472,7 +493,8 @@ async def fetch_all_matches():
     
     for m in all_matches:
         if m.get('source') == "TheOdds":
-            key = (m.get('home'), m.get('away'), m.get('start'), m.get('sport'))
+            # Hata olasılığını azaltmak için start'ı 24 saat aralığa normalize et
+            key = (m.get('home'), m.get('away'), m.get('start')[:10], m.get('sport'))
             odds_map[key] = m.get('odds', {})
             
     for m in all_matches:
@@ -490,7 +512,7 @@ async def fetch_all_matches():
         
         m_odds = m.get('odds', {})
         if not m_odds:
-            key = (m.get('home'), m.get('away'), start, sport_key)
+            key = (m.get('home'), m.get('away'), start[:10], sport_key)
             m_odds = odds_map.get(key, {})
             m['odds'] = m_odds
             
@@ -583,7 +605,9 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
 # ---------------- Prediction wrapper ----------------
 async def predict_for_match(m: dict, coupon_type: str):
     is_high_conf = coupon_type in ["VIP", "LIVE", "NBA"]
-    temp = 0.1 if is_high_conf else 0.2
+    # Instant Analysis kuponu için daha düşük sıcaklık, daha yüksek güven arıyoruz
+    is_instant_analysis = coupon_type == "INSTANT"
+    temp = 0.1 if is_high_conf or is_instant_analysis else 0.2
     
     prompt = (
         f"Spor: {m.get('sport')}\nMaç: {m.get('home')} vs {m.get('away')}\n"
@@ -604,9 +628,9 @@ async def predict_for_match(m: dict, coupon_type: str):
         log.warning(f"AI tahmini başarısız veya boş: {m.get('id')}. Fallback kullanılıyor.")
         
         preds = []
-        if is_high_conf: 
-            preds.append({"market":"MS","suggestion":"MS X","confidence":70,"explanation":"Riskli ama potansiyeli yüksek beraberlik tahmini."})
-            preds.append({"market":"TOTALS","suggestion":"Over 3.5","confidence":65,"explanation":"Yüksek skor sürprizi denemesi."})
+        if is_high_conf or is_instant_analysis: 
+            # Instant Analysis için bile %75 altı olmamalı
+            preds.append({"market":"MS","suggestion":"MS 1 (Riskli Fallback)","confidence":75,"explanation":"AI çağrısı başarısız olduğu için yüksek güvenilirliğe sahip varsayılan fallback."})
         else: 
             preds.append({"market":"MS","suggestion":"MS 1","confidence":75,"explanation":"Ev sahibi, veriler ışığında güvenilir bir seçenek."})
             preds.append({"market":"TOTALS","suggestion":"Under 2.5","confidence":70,"explanation":"Düşük skorlu, defansif bir karşılaşma bekleniyor."})
@@ -627,7 +651,7 @@ async def predict_for_match(m: dict, coupon_type: str):
 
 
 # ---------------- Build coupon ----------------
-def format_match_block(m, pred, is_nba_coupon):
+def format_match_block(m, pred, coupon_type):
     start_local = to_local_str(m.get("start") or "")
     best = pred["predictions"][pred["best"]] if pred["predictions"] else None
     
@@ -638,6 +662,8 @@ def format_match_block(m, pred, is_nba_coupon):
     explanation = best.get('explanation','').replace(" (F)", "") 
     sport_name = m.get('sport','❓ Bilinmeyen Spor')
     
+    is_nba_coupon = coupon_type == "NBA"
+    
     # Oran çekimi
     target_odd = get_odd_for_market(m, suggestion)
     odd_line = ""
@@ -645,7 +671,7 @@ def format_match_block(m, pred, is_nba_coupon):
     if target_odd:
         # Oran varsa satırı oluştur
         display_suggestion = suggestion.split(':')[0].strip() if ':' in suggestion and not is_nba_coupon else suggestion
-        if "MS" in display_suggestion:
+        if "MS" in display_suggestion and coupon_type != "INSTANT":
              display_suggestion = display_suggestion.replace("MS", "").strip()
         
         odd_line = f"💰 Oran: {display_suggestion}: <b>{target_odd:.2f}</b>\n"
@@ -672,10 +698,25 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
     
     is_daily_coupon = coupon_type == "DAILY"
     is_nba_coupon = coupon_type == "NBA"
+    is_instant_coupon = coupon_type == "INSTANT" # YENİ TİP
     
-    min_conf = NBA_MIN_CONFIDENCE if is_nba_coupon else (LIVE_MIN_CONFIDENCE if coupon_type == "LIVE" else MIN_CONFIDENCE)
-    min_odd = NBA_MIN_ODDS if is_nba_coupon else None
-    max_odd = DAILY_MAX_ODDS if is_daily_coupon else None
+    # Filtre Değerlerinin Belirlenmesi
+    if is_instant_coupon:
+        min_conf = INSTANT_ANALYSIS_MIN_CONFIDENCE
+        min_odd = None # Şart aranmıyor, ancak min_odd/max_odd filtreleri uygulanacak
+        max_odd = INSTANT_ANALYSIS_MAX_ODDS
+    elif is_nba_coupon:
+        min_conf = NBA_MIN_CONFIDENCE
+        min_odd = NBA_MIN_ODDS
+        max_odd = None
+    elif coupon_type == "LIVE":
+        min_conf = LIVE_MIN_CONFIDENCE
+        min_odd = None
+        max_odd = None
+    else: # DAILY, VIP, TEST
+        min_conf = MIN_CONFIDENCE
+        min_odd = None 
+        max_odd = DAILY_MAX_ODDS if is_daily_coupon else None
     
     match_preds = []
     
@@ -687,14 +728,15 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
             
             odd = get_odd_for_market(m, best["suggestion"])
             
-            # Oran yoksa min %80 güven şartı kontrolü (Kazanmaya yönelik)
-            if odd is None:
+            # Oran yoksa min %80 güven şartı kontrolü (Sadece INSTANT hariç)
+            if odd is None and not is_instant_coupon:
                 if best["confidence"] < NO_ODDS_MIN_CONFIDENCE:
                     log.info(f"Maç atlandı (Oran Yok & Güven < %{NO_ODDS_MIN_CONFIDENCE}): {m.get('home')} vs {m.get('away')}")
                     continue
             
-            # Normal güven filtresi (Oran varsa min_conf kullanılır)
+            # Normal güven filtresi
             elif best["confidence"] < min_conf:
+                 log.info(f"Maç atlandı (Güven < %{min_conf}): {m.get('home')} vs {m.get('away')}")
                  continue
                  
             # Oran filtreleri (Oran varsa uygulanır)
@@ -716,20 +758,23 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
             
         match_id = m.get("id")
         
+        # INSTANT kuponlar için 2 saat (120 dakika) bekleme süresi kontrolü
         if coupon_type != "LIVE": 
-             if match_id in posted_matches and (now - posted_matches[match_id]).total_seconds() < 24*3600:
-                log.info(f"Maç atlandı (zaten yayınlandı): {m.get('home')} vs {m.get('away')}")
+             # Eğer maç daha önce yayınlanmışsa ve cooldown süresi dolmadıysa atla
+             if match_id in posted_matches and (now - posted_matches[match_id]).total_seconds() < INSTANT_ANALYSIS_COOLDOWN_MINUTES * 60:
+                log.info(f"Maç atlandı (zaten yayınlandı ve cooldown: {INSTANT_ANALYSIS_COOLDOWN_MINUTES}dk): {m.get('home')} vs {m.get('away')}")
                 continue
         
-        lines.append(format_match_block(m, pred, is_nba_coupon))
+        lines.append(format_match_block(m, pred, coupon_type))
             
         if "TEST" not in title and coupon_type != "LIVE":
+             # Instant kuponlar için bile posted_matches'e ekle
              posted_matches[match_id] = now
              
         count += 1
             
     # Kupon min maç kontrolü
-    if (is_daily_coupon or is_nba_coupon) and count < 2:
+    if not is_instant_coupon and (is_daily_coupon or is_nba_coupon) and count < 2:
         log.warning(f"{coupon_type} kuponunda ({count} maç) minimum 2 maç şartı sağlanamadı. Kupon atlandı.")
         return None
 
@@ -751,6 +796,53 @@ async def post_coupon_after_delay(app, text, delay_minutes):
     if delay_minutes > 0:
         await asyncio.sleep(delay_minutes * 60)
     await send_to_channel(app, text)
+    global last_run
+    last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
+
+
+# ---------------- INSTANT ANALYSIS JOB (YENİ) ----------------
+async def run_instant_analysis_job(app: Application, all_matches: list):
+    log.info(f"Anlık Analiz döngüsü başlatılıyor. (Min %{INSTANT_ANALYSIS_MIN_CONFIDENCE} güven aranıyor)")
+    
+    # Canlı maçlar ve başlamasına 1 saatten az kalan maçlar hariç tutulur
+    upcoming_matches = [m for m in all_matches if not m.get("live") and within_hours(m.get("start"), 168)] # 7 gün içindeki tüm maçlar
+    
+    # Sadece yarım saat ile 24 saat arasında başlayacak maçlar dikkate alınır
+    # (Diğer kuponların kapsamadığı, ancak çok da uzak olmayan maçlar)
+    target_matches = []
+    now = datetime.now(timezone.utc)
+    for m in upcoming_matches:
+        try:
+            start_dt = datetime.fromisoformat(m.get("start").replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
+            time_to_start = (start_dt - now).total_seconds()
+            if 1800 <= time_to_start <= 24 * 3600: # 30 dakika ile 24 saat arasında
+                 target_matches.append(m)
+        except:
+            continue
+            
+    if not target_matches:
+        log.info("Anlık Analiz için uygun maç bulunamadı (30dk-24saat aralığında).")
+        last_run["INSTANT"] = datetime.now(timezone.utc)
+        return
+
+    # Güven yüzdesine göre en iyi 1 maçı seçmek için build_coupon_text'i kullan
+    text = await build_coupon_text(
+        target_matches, 
+        "⚡ ANLIK AI ANALİZ (Continuity Bet)", 
+        max_matches=1,
+        coupon_type="INSTANT"
+    )
+    
+    if text:
+        # Hemen gönderme
+        await send_to_channel(app, text)
+        global last_run
+        last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
+    else:
+        log.info(f"Anlık Analiz kuponu oluşturulamadı (Filtreler veya Min %{INSTANT_ANALYSIS_MIN_CONFIDENCE} güven).")
+        
+    last_run["INSTANT"] = datetime.now(timezone.utc)
+
 
 # ---------------- NBA COUPON JOB ----------------
 async def run_nba_coupon_job(app: Application, all_matches: list):
@@ -771,6 +863,8 @@ async def run_nba_coupon_job(app: Application, all_matches: list):
     
     if text:
         await send_to_channel(app, text)
+        global last_run
+        last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     else:
         log.info("NBA kuponu oluşturulamadı (Filtreler veya Min Maç Sayısı).")
         
@@ -819,6 +913,7 @@ async def run_live_coupon_job(app: Application, all_matches: list):
         )
 
         if text:
+            # post_coupon_after_delay içindeki global değişken güncellemesi yapıldı.
             asyncio.create_task(post_coupon_after_delay(app, text, delay))
             log.info(f"Canlı maç '{m.get('home')}' için {delay} dakika gecikmeli gönderim planlandı.")
         
@@ -863,12 +958,17 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def initial_runs_scheduler(app: Application, all_matches):
     """Bot başlatıldıktan sonra istenen ilk kuponları belirli sürelerde gönderir."""
     
-    # --- 1. NBA COUPON (NBA: 1 Dakika Sonra) ---
-    await asyncio.sleep(60)
+    # --- 1. INSTANT ANALYSIS COUPON (Anında Çalışsın) ---
+    await asyncio.sleep(5)
+    log.info("İlk Anlık Analiz Kuponu hemen hazırlanıyor.")
+    await run_instant_analysis_job(app, all_matches)
+
+    # --- 2. NBA COUPON (NBA: 1 Dakika Sonra) ---
+    await asyncio.sleep(55)
     log.info("İlk NBA Kuponu hazırlanıyor.")
     await run_nba_coupon_job(app, all_matches)
 
-    # --- 2. DAILY COUPON (Günlük: 4 Dakika Sonra) ---
+    # --- 3. DAILY COUPON (Günlük: 4 Dakika Sonra) ---
     await asyncio.sleep(180) 
     log.info("İlk Günlük Kupon hazırlanıyor.")
     
@@ -880,9 +980,10 @@ async def initial_runs_scheduler(app: Application, all_matches):
     )
     if text_daily:
           await send_to_channel(app, text_daily)
+          last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     last_run["DAILY"] = datetime.now(timezone.utc)
     
-    # --- 3. VIP COUPON (VIP: 11 Dakika Sonra) ---
+    # --- 4. VIP COUPON (VIP: 11 Dakika Sonra) ---
     await asyncio.sleep(420) 
     log.info("İlk VIP Kupon hazırlanıyor.")
 
@@ -894,9 +995,10 @@ async def initial_runs_scheduler(app: Application, all_matches):
     )
     if text_vip:
          await send_to_channel(app, text_vip)
+         last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     last_run["VIP"] = datetime.now(timezone.utc)
     
-    # --- 4. LIVE COUPON (Anında) ---
+    # --- 5. LIVE COUPON (Anında) ---
     log.info("İlk Canlı Kupon çalıştırması hemen başlatılıyor.")
     await run_live_coupon_job(app, all_matches)
 
@@ -952,6 +1054,7 @@ async def job_runner(app: Application):
                 )
                 if text:
                     await send_to_channel(app, text)
+                    last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
                 last_run["DAILY"] = now
                     
             # --- VIP (3 saatlik) ---
@@ -967,17 +1070,31 @@ async def job_runner(app: Application):
                 )
                 if text:
                     await send_to_channel(app, text)
+                    last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
                 last_run["VIP"] = now
             
             # --- NBA (24 saatlik) ---
             lr_nba = last_run.get("NBA")
             if lr_nba and (now - lr_nba).total_seconds() >= NBA_INTERVAL_HOURS*3600:
                 await run_nba_coupon_job(app, all_matches)
+            
+            # --- INSTANT ANALYSIS (20 dakikada bir kontrol) ---
+            # SADECE son 20 dakikada ana kupon (LIVE, DAILY, VIP, NBA) atılmadıysa çalıştır
+            lr_instant = last_run.get("INSTANT")
+            
+            last_post_time = last_run.get("LAST_COUPON_POSTED")
+            is_gap = last_post_time is None or (now - last_post_time).total_seconds() >= 1200 # 20 dakika (1200 saniye)
+            
+            is_instant_due = lr_instant is None or (now - lr_instant).total_seconds() >= INSTANT_ANALYSIS_INTERVAL_MINUTES*60
+            
+            if is_gap and is_instant_due:
+                log.info("Boşluk algılandı. Anlık Analiz döngüsü başlatılıyor.")
+                await run_instant_analysis_job(app, all_matches)
                         
         except Exception as e:
             log.exception(f"Job runner hata: {e}")
             
-        await asyncio.sleep(3600) # Her saat başı kontrol
+        await asyncio.sleep(60) # Her dakika kontrol et
 
 def main():
     if not TELEGRAM_TOKEN: log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor."); sys.exit(1)
@@ -993,7 +1110,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.8 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.9 (Anlık Analiz entegre) başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
