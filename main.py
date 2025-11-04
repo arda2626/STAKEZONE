@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 import uvicorn
 from dotenv import load_dotenv
 import os
+from ai_turkce import ai_turkce_analiz
 
 # .env dosyasını yükle
 load_dotenv()
@@ -324,21 +325,38 @@ async def build_coupon(title, max_hours, interval, max_matches, live_only=False)
     selected = evaluated[:max_matches]
 
     lines = []
+    async def build_coupon(title, max_hours, interval, max_matches, live_only=False):
+    # ... (senin mevcut kodun devamı burada)
+    
     for score, m, preds, best in selected:
-        emoji = SPORT_EMOJI.get(m.get("sport","soccer"), "🏟️")
+        emoji = SPORT_EMOJI.get(m.get("sport", "soccer"), "🏟️")
         status = "CANLI" if m.get("live") else m["start"].astimezone(TR_TIME).strftime("%d %b %H:%M")
-        # formatla: en iyi öneriyi öne çıkar, ardından diğer öneriler
-        best_line = f"<b>Öne Çıkan:</b> {best['suggestion']} | <b>Güven:</b> %{best['confidence']}\n<i>{best.get('explanation','')}</i>\n" if best else ""
+
+        # En iyi öneri ve diğerleri
+        best_line = (
+            f"<b>Öne Çıkan:</b> {best['suggestion']} | <b>Güven:</b> %{best['confidence']}\n"
+            f"<i>{best.get('explanation','')}</i>\n" if best else ""
+        )
+
         other_lines = ""
         for p in preds:
-            if p == best: continue
+            if p == best:
+                continue
             other_lines += f"- {p['suggestion']} (%{p['confidence']}) — {p.get('explanation','')}\n"
+
+        # 🧠 Türkçe AI analiz (OpenAI GPT-4o)
+        analiz = await ai_turkce_analiz(
+            f"{m['home']} vs {m['away']} - En iyi tahmin: {best.get('suggestion','Bilinmiyor')} | Açıklama: {best.get('explanation','Yok')}"
+        )
+
         block = (
             f"{emoji} <b>{m['home']} vs {m['away']}</b>\n"
             f"{status}\n"
             f"{best_line}"
             f"{other_lines}"
+            f"🧠 <i>{analiz}</i>\n"   # 🔹 AI analizi eklendi
         )
+
         lines.append(block)
         posted_matches[m["id"]] = True
 
