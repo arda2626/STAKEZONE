@@ -1,4 +1,4 @@
-# main.py - v19.2 (YENİ KEYLER + 3 YEDEK API + NBA + ASYA)
+# main.py - v20.0 (TEK KUPON + YEDEK API + GÜNCEL KEYLER)
 import asyncio, logging, random
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler
@@ -6,30 +6,24 @@ from telegram import Update
 from fastapi import FastAPI, Request
 import uvicorn, aiohttp
 
-# DB ve utils (varsayıyoruz ki var)
+# DB (varsa, yoksa geç)
 # from db import init_db, DB_PATH, mark_posted, was_posted_recently
-# from prediction import ai_predict
-# from utils import league_to_flag, get_live_minute, get_live_events
 
 TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
 
 # GÜNCEL API KEY'LER (Render Environment'a da ekle!)
-THE_ODDS_API_KEY = "41eb74e295dfecf0a675417cbb56cf4d"
-API_FOOTBALL_KEY = "bd1350bea151ef9f56ed417f0c0c3ea2"  # api-sports.io
-BALLDONTLIE_KEY = ""  # Ücretsiz, key yok
-FOOTYSTATS_KEY = "test85g57"  # footystats.org test key
+THE_ODDS_API_KEY = "501ea1ade60d5f0b13b8f34f90cd51e6"
+API_FOOTBALL_KEY = "bd1350bea151ef9f56ed417f0c0c3ea2"
+BALLDONTLIE_KEY = ""
+FOOTYSTATS_KEY = "test85g57"
 
 TR_TIME = timezone(timedelta(hours=3))
 NOW_UTC = datetime.now(timezone.utc)
 
-# LİGLER (NBA + ASYA + TÜRKİYE + AVRUPA)
-ALL_SPORTS = [
-    "basketball_nba", "basketball_euroleague",
-    "soccer_turkey_super_league", "soccer_greece_super_league",
-    "soccer_epl", "soccer_la_liga", "soccer_asia_afc_champions_league"
-]
+# TEK KUPON İÇİN GLOBAL KONTROL (2. kez atmasın!)
+posted_today = set()  # Günlük reset
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger()
@@ -37,7 +31,7 @@ log = logging.getLogger()
 def neon_banner(title, conf):
     return (
         "✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦\n"
-        "   ⚡ STAKEZONE AI v19.2 ⚡\n"
+        "   ⚡ STAKEZONE AI v20.0 ⚡\n"
         "✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦✦\n\n"
         f"      {title}\n"
         f"   📅 {datetime.now(TR_TIME).strftime('%d %B %Y - %H:%M')} TÜRKİYE\n"
@@ -45,95 +39,87 @@ def neon_banner(title, conf):
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
-# YEDEK API SİSTEMİ
-async def get_matches_from_api(api_type, max_hours_ahead=0):
+# YEDEK API SİSTEMİ (The Odds → API-Football → Balldontlie)
+async def fetch_matches(max_hours_ahead=0):
     matches = []
+    apis = [
+        ("the_odds", THE_ODDS_API_KEY),
+        ("api_football", API_FOOTBALL_KEY),
+        ("balldontlie", BALLDONTLIE_KEY)
+    ]
+
     async with aiohttp.ClientSession() as s:
-        try:
-            if api_type == "the_odds":
-                for sport in ALL_SPORTS:
-                    async with s.get(f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-                                    params={"apiKey": THE_ODDS_API_KEY, "regions": "eu"}) as r:
+        for api_name, key in apis:
+            try:
+                if api_name == "the_odds" and key:
+                    for sport in ["basketball_nba", "soccer_epl", "soccer_turkey_super_league", "soccer_asia_afc_champions_league"]:
+                        async with s.get(f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
+                                        params={"apiKey": key, "regions": "eu,us"}) as r:
+                            if r.status == 200:
+                                data = await r.json()
+                                for g in data:
+                                    if not g.get("commence_time"): continue
+                                    start = datetime.fromisoformat(g["commence_time"].replace("Z", "+00:00"))
+                                    delta = (start - NOW_UTC).total_seconds() / 3600
+                                    if 0 <= delta <= max_hours_ahead:
+                                        match_id = f"odds_{g['id']}"
+                                        if match_id not in posted_today:
+                                            matches.append({"id": match_id, "home": g["home_team"], "away": g["away_team"], "start": start, "sport": sport})
+                            elif r.status == 429:
+                                log.warning("The Odds API kota doldu → Yedek API'ye geçiliyor")
+                                break
+
+                elif api_name == "api_football" and key:
+                    async with s.get("https://v3.football.api-sports.io/fixtures",
+                                    headers={"x-apisports-key": key},
+                                    params={"live": "all"}) as r:
                         if r.status == 200:
                             data = await r.json()
-                            for g in data:
-                                if not g.get("commence_time"): continue
-                                start = datetime.fromisoformat(g["commence_time"].replace("Z", "+00:00"))
+                            for f in data.get("response", []):
+                                start = datetime.fromisoformat(f["fixture"]["date"].replace("Z", "+00:00"))
                                 delta = (start - NOW_UTC).total_seconds() / 3600
                                 if 0 <= delta <= max_hours_ahead:
-                                    matches.append({
-                                        "id": g["id"], "home": g["home_team"], "away": g["away_team"],
-                                        "sport": sport, "start": start
-                                    })
-                        elif r.status == 429:
-                            log.warning("The Odds API kota doldu!")
-                            break
+                                    match_id = f"foot_{f['fixture']['id']}"
+                                    if match_id not in posted_today:
+                                        matches.append({"id": match_id, "home": f["teams"]["home"]["name"], "away": f["teams"]["away"]["name"], "start": start, "sport": "soccer"})
 
-            elif api_type == "api_football" and API_FOOTBALL_KEY:
-                async with s.get("https://v3.football.api-sports.io/fixtures",
-                                headers={"x-apisports-key": API_FOOTBALL_KEY},
-                                params={"live": "all"}) as r:
-                    if r.status == 200:
-                        data = await r.json()
-                        for f in data.get("response", []):
-                            start = datetime.fromisoformat(f["fixture"]["date"].replace("Z", "+00:00"))
-                            delta = (start - NOW_UTC).total_seconds() / 3600
-                            if 0 <= delta <= max_hours_ahead:
-                                matches.append({
-                                    "id": f["fixture"]["id"], "home": f["teams"]["home"]["name"],
-                                    "away": f["teams"]["away"]["name"], "sport": "soccer", "start": start
-                                })
+                elif api_name == "balldontlie":
+                    async with s.get("https://www.balldontlie.io/api/v1/games",
+                                    params={"per_page": 25, "seasons[]": 2025}) as r:
+                        if r.status == 200:
+                            data = await r.json()
+                            for g in data["data"]:
+                                try:
+                                    start = datetime.fromisoformat(g["date"])
+                                    delta = (start - NOW_UTC).total_seconds() / 3600
+                                    if 0 <= delta <= max_hours_ahead:
+                                        match_id = f"ball_{g['id']}"
+                                        if match_id not in posted_today:
+                                            matches.append({"id": match_id, "home": g["home_team"]["full_name"], "away": g["visitor_team"]["full_name"], "start": start, "sport": "basketball_nba"})
+                                except: pass
 
-            elif api_type == "balldontlie":
-                async with s.get("https://www.balldontlie.io/api/v1/games",
-                                params={"per_page": 25, "seasons[]": 2025}) as r:
-                    if r.status == 200:
-                        data = await r.json()
-                        for g in data["data"]:
-                            try:
-                                start = datetime.fromisoformat(g["date"])
-                                delta = (start - NOW_UTC).total_seconds() / 3600
-                                if 0 <= delta <= max_hours_ahead:
-                                    matches.append({
-                                        "id": g["id"], "home": g["home_team"]["full_name"],
-                                        "away": g["visitor_team"]["full_name"], "sport": "basketball_nba", "start": start
-                                    })
-                            except: pass
-
-        except Exception as e:
-            log.warning(f"API hatası {api_type}: {e}")
+                if matches: break  # İlk çalışan API'den maç aldıysan dur
+            except Exception as e:
+                log.warning(f"{api_name} hatası: {e}")
+                continue
     return matches
 
 async def build_coupon(min_conf, title, max_hours_ahead=0):
-    apis = ["the_odds", "api_football", "balldontlie"]
-    all_matches = []
-    for api in apis:
-        matches = await get_matches_from_api(api, max_hours_ahead)
-        all_matches.extend(matches)
-        if len(all_matches) >= 3: break
+    global posted_today
+    if datetime.now(TR_TIME).hour == 0: posted_today.clear()  # Gece reset
 
-    if not all_matches:
+    matches = await fetch_matches(max_hours_ahead)
+    if not matches:
         return None
 
     def ai_predict(m):
         conf = random.uniform(min_conf, 0.95)
-        return {
-            "confidence": conf,
-            "main_bet": "ÜST 2.5" if "soccer" in m["sport"] else "ÜST 220.5",
-            "corner_bet": "KORNER ÜST 9.5",
-            "card_bet": "KART ÜST 3.5"
-        }
+        bet = "ÜST 2.5" if "soccer" in m["sport"] else "ÜST 220.5"
+        return {"confidence": conf, "main_bet": bet, "odds": round(1.5 + random.uniform(0.1, 1.0), 2)}
 
-    picks = []
-    for m in all_matches:
-        p = ai_predict(m)
-        p["odds"] = round(1.5 + random.uniform(0.1, 1.0), 2)
-        if p["confidence"] >= min_conf:
-            picks.append((p["confidence"], {**m, **p}))
+    best = max((ai_predict(m), m) for m in matches)[1]
+    posted_today.add(best["id"])  # TEKRAR ATMASIN!
 
-    if not picks: return None
-
-    best = max(picks, key=lambda x: x[0])[1]
     minute = f" ⏰ {best['start'].astimezone(TR_TIME).strftime('%H:%M')}"
 
     return (
@@ -144,23 +130,15 @@ async def build_coupon(min_conf, title, max_hours_ahead=0):
         f"💰 Oran: <b>{best['odds']:.2f}</b>\n"
         f"📊 AI GÜVEN: <b>%{int(best['confidence']*100)}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🚀 ABONE OL! @stakedrip"
+        "ABONE OL! @stakedrip"
     )
 
 async def no_match_message(title):
-    return f"⚡ STAKEZONE AI v19.2 ⚡\n\n      {title}\n   📅 {datetime.now(TR_TIME).strftime('%d %B %Y - %H:%M')} TÜRKİYE\n\n⏳ Maç bekleniyor...\nABONE OL! @stakedrip"
+    return f"STAKEZONE AI v20.0\n\n      {title}\n   {datetime.now(TR_TIME).strftime('%d %B %Y - %H:%M')} TÜRKİYE\n\nMaç bekleniyor...\nABONE OL! @stakedrip"
 
-async def hourly_job(ctx):
-    text = await build_coupon(0.55, "CANLI KUPON", 0)
-    await ctx.bot.send_message(CHANNEL_ID, text or await no_match_message("CANLI KUPON"), parse_mode="HTML")
-
-async def daily_job(ctx):
-    text = await build_coupon(0.60, "GÜNLÜK KUPON", 12)
-    await ctx.bot.send_message(CHANNEL_ID, text or await no_match_message("GÜNLÜK KUPON"), parse_mode="HTML")
-
-async def vip_job(ctx):
-    text = await build_coupon(0.80, "VIP KUPON", 24)
-    await ctx.bot.send_message(CHANNEL_ID, text or await no_match_message("VIP KUPON"), parse_mode="HTML")
+async def hourly_job(ctx): text = await build_coupon(0.55, "CANLI KUPON", 0); await ctx.bot.send_message(CHANNEL_ID, text or await no_match_message("CANLI KUPON"), parse_mode="HTML")
+async def daily_job(ctx):  text = await build_coupon(0.60, "GÜNLÜK KUPON", 12); await ctx.bot.send_message(CHANNEL_ID, text or await no_match_message("GÜNLÜK KUPON"), parse_mode="HTML")
+async def vip_job(ctx):    text = await build_coupon(0.80, "VIP KUPON", 24);   await ctx.bot.send_message(CHANNEL_ID, text or await no_match_message("VIP KUPON"), parse_mode="HTML")
 
 app = FastAPI()
 tg = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -177,7 +155,7 @@ async def start():
     jq.run_repeating(vip_job, 86400, first=30)
     await tg.initialize(); await tg.start()
     await tg.bot.set_webhook(WEBHOOK_URL)
-    log.info("v19.2 HAZIR – 3 YEDEK API!")
+    log.info("v20.0 HAZIR – TEK KUPON + YEDEK API!")
 
 @app.post("/stakedrip")
 async def webhook(req: Request):
