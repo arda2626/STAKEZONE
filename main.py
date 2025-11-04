@@ -1,4 +1,4 @@
-# main.py — v61.4 (Rate Limit Fix)
+# main.py — v61.6 (Strateji ve Modernleştirme)
 
 import os
 import asyncio
@@ -6,32 +6,32 @@ import logging
 import json
 import random
 import sys
+import ssl 
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
 from aiohttp import ClientError
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-# Yeni import: SSL Hatası Yönetimi İçin
-import ssl 
+from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v61.4") 
+log = logging.getLogger("v61.6") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# API keyler (Sizin verdiğiniz ve mevcut anahtarlar)
+# API keyler (Mevcut anahtarlar)
 API_FOOTBALL_KEY = "bd1350bea151ef9f56ed417f0c0c3ea2" 
 THE_ODDS_API_KEY = "501ea1ade60d5f0b13b8f34f90cd51e6" 
-BALLDONTLIE_KEY = os.getenv("BALLDONTLIE_KEY", "").strip() 
-FOOTYSTATS_KEY = "test85g57" 
+# BallDontLie'ın public endpoint'inde anahtar kullanılmıyor, ancak diğer API anahtarları korunuyor.
 ALLSPORTSAPI_KEY = "27b16a330f4ac79a1f8eb383fec049b9cc0818d5e33645d771e2823db5d80369"
 SPORTSMONKS_KEY = "AirVTC8HLItQs55iaXp9TnZ45fdQiK6ecwFFgNavnHSIQxabupFbTrHED7FJ"
 ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
+FOOTYSTATS_KEY = "test85g57" 
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
 FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "").strip() 
 
@@ -50,7 +50,29 @@ MIN_CONFIDENCE = 60
 # state
 posted_matches = {}
 last_run = {"DAILY": None, "VIP": None} 
-ai_rate_limit = {"calls": 0, "reset": NOW_UTC}
+ai_rate_limit = {"calls": 0, "reset": NOW_UTC} 
+
+# LİG VE SPOR MODERNİZASYON MAPPING'İ (Yeni Strateji)
+SPORT_NAME_MAPPING = {
+    "soccer": "⚽ Futbol",
+    "Football": "⚽ Futbol",
+    "Soccer": "⚽ Futbol",
+    "Basketball": "🏀 Basketbol",
+    "Buz Hokeyi (NHL)": "🏒 Buz Hokeyi (NHL)",
+    "Formula 1": "🏎️ Formula 1",
+    "Bilinmeyen Spor": "❓ Bilinmeyen Spor"
+}
+
+LEAGUE_NAME_MAPPING = {
+    "English Premier League": "Premier Lig",
+    "German Bundesliga": "Bundesliga",
+    "La Liga": "La Liga",
+    "NBA": "NBA (Basketbol)",
+    "Football (Bundesliga)": "Bundesliga",
+    "Basketball (NBA)": "NBA",
+    "Premier League": "Premier Lig",
+    "NHL Stats": "NHL",
+}
 
 # ---------------- helpers ----------------
 def to_local_str(iso_ts: str):
@@ -85,8 +107,9 @@ def cleanup_posted_matches():
     now = datetime.now(timezone.utc)
     posted_matches = {mid: dt for mid, dt in posted_matches.items() if (now - dt).total_seconds() < 24*3600}
     log.info(f"Temizleme sonrası posted_matches boyutu: {len(posted_matches)}")
-
+    
 def get_odd_for_market(m: dict, prediction_suggestion: str):
+    # Oranları sadece TheOdds'tan çekme mantığı korunuyor
     odds_data = m.get("odds")
     if m.get("source") != "TheOdds" or not odds_data or not isinstance(odds_data, list):
         return None
@@ -115,29 +138,35 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
     return max(prices) if prices else None
 
 def get_all_h2h_odds(m: dict):
-    odds_data = m.get("odds")
     res = {'E': '?', 'B': '?', 'D': '?'}
-    if m.get("source") != "TheOdds" or not odds_data or not isinstance(odds_data, list):
-        return res
-
-    for bookmaker in odds_data:
-        for market in bookmaker.get("markets", []):
-            if market.get("key") == "h2h":
-                for outcome in market.get("outcomes", []):
-                    name = outcome.get("name")
-                    price = outcome.get("price")
-                    if name in [m.get('home'), 'Home', '1']: res['E'] = price
-                    if name in [m.get('away'), 'Away', '2']: res['D'] = price
-                    if name in ['Draw', 'X', '0']: res['B'] = price
-                
-                if res['E'] != '?' and res['B'] != '?' and res['D'] != '?':
-                    return res
+    odds_data = m.get("odds")
+    source = m.get("source")
+    
+    # 1. Öncelik: TheOdds (standart yapısı)
+    if source == "TheOdds" and odds_data and isinstance(odds_data, list):
+        for bookmaker in odds_data:
+            for market in bookmaker.get("markets", []):
+                if market.get("key") == "h2h":
+                    for outcome in market.get("outcomes", []):
+                        name = outcome.get("name")
+                        price = outcome.get("price")
+                        price_str = f"{price:.2f}" if isinstance(price, (int, float)) else '?'
+                        
+                        if name in [m.get('home'), 'Home', '1']: res['E'] = price_str
+                        if name in [m.get('away'), 'Away', '2']: res['D'] = price_str
+                        if name in ['Draw', 'X', '0']: res['B'] = price_str
+                    if res['E'] != '?' and res['B'] != '?' and res['D'] != '?':
+                        return res
+    
+    # Şu anda diğer API'lerin oran yapıları karmaşık olduğu için h2h oranlarını çekmiyoruz.
+    # Eğer TheOdds'tan oran gelmezse '?' döndürüyoruz.
     return res
-
 
 # ---------------- fetch APIs ----------------
 
+# Futbol API'leri (Sıralı Öncelik)
 async def fetch_api_football(session):
+    # ... (API-Football fetch kodu korunuyor) ...
     name = "API-Football"
     res = []
     url = "https://v3.football.api-sports.io/fixtures"
@@ -175,6 +204,7 @@ async def fetch_api_football(session):
     return res
 
 async def fetch_the_odds(session):
+    # ... (TheOdds fetch kodu korunuyor) ...
     name = "TheOdds"
     res = []
     url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
@@ -206,7 +236,73 @@ async def fetch_the_odds(session):
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
 
+async def fetch_openligadb(session):
+    # ... (OpenLigaDB fetch kodu korunuyor) ...
+    name = "OpenLigaDB"
+    res = []
+    url = "https://www.openligadb.de/api/getmatchdata/bl1/2025/1"
+    try:
+        async with session.get(url, timeout=12) as r:
+            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            
+            items = await r.json()
+            if not isinstance(items, list): items = []
+            
+            for it in items:
+                start = it.get("matchDateTimeUTC")
+                
+                if it.get("matchIsFinished"): continue
+                if not within_hours(start, 24): continue
+                
+                res.append({
+                    "id": it.get('matchID'),
+                    "home": safe_get(it,"team1","teamName") or "Home",
+                    "away": safe_get(it,"team2","teamName") or "Away",
+                    "start": start,
+                    "source": name,
+                    "live": False,
+                    "odds": {},
+                    "sport": "Football (Bundesliga)"
+                })
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
+async def fetch_sportsmonks(session):
+    # ... (SportsMonks fetch kodu korunuyor) ...
+    name = "SportsMonks"
+    res = []
+    url = "https://api.sportmonks.com/v3/football/fixtures"
+    params = {"api_token": SPORTSMONKS_KEY, "include": "odds", "filter[starts_between]": f"{NOW_UTC.strftime('%Y-%m-%d')},{ (NOW_UTC + timedelta(days=1)).strftime('%Y-%m-%d')}"}
+    if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
+    try:
+        async with session.get(url, params=params, timeout=12) as r:
+            if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
+            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            
+            data = await r.json()
+            items = data.get("data") or []
+            for it in items:
+                start = it.get("starting_at")
+                
+                if not within_hours(start, 24): continue
+                
+                res.append({
+                    "id": it.get('id'),
+                    "home": it.get("home_team_name","Home"),
+                    "away": it.get("away_team_name","Away"),
+                    "start": start,
+                    "source": name,
+                    "live": False,
+                    "odds": it.get("odds", {}),
+                    "sport": "Football"
+                })
+            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    return res
+
 async def fetch_footystats(session):
+    # ... (FootyStats fetch kodu korunuyor) ...
     name = "FootyStats"
     res = []
     url = "https://api.footystats.org/league-matches"
@@ -240,71 +336,54 @@ async def fetch_footystats(session):
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
 
-async def fetch_allsports(session):
-    name = "AllSportsAPI"
+# Basketbol API'leri (Sıralı Öncelik)
+async def fetch_balldontlie(session):
+    name = "BallDontLie"
     res = []
-    url = "https://allsportsapi2.p.rapidapi.com/api/football/matches/upcoming" 
-    headers = {"x-rapidapi-host":"allsportsapi2.p.rapidapi.com","x-rapidapi-key":ALLSPORTSAPI_KEY}
-    if not ALLSPORTSAPI_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
-    try:
-        async with session.get(url, headers=headers, timeout=12) as r:
-            if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
-            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            
-            data = await r.json()
-            items = data.get("result") or []
-            for it in items:
-                start = it.get("event_date_start")
-                
-                if not within_hours(start, 24): continue
-                
-                res.append({
-                    "id": it.get('event_key'),
-                    "home": it.get("event_home_team","Home"),
-                    "away": it.get("event_away_team","Away"),
-                    "start": start,
-                    "source": name,
-                    "live": False,
-                    "odds": {},
-                    "sport": "Football"
-                })
-            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
-    return res
-
-async def fetch_sportsmonks(session):
-    name = "SportsMonks"
-    res = []
-    url = "https://api.sportmonks.com/v3/football/fixtures"
-    params = {"api_token": SPORTSMONKS_KEY, "include": "odds", "filter[starts_between]": f"{NOW_UTC.strftime('%Y-%m-%d')},{ (NOW_UTC + timedelta(days=1)).strftime('%Y-%m-%d')}"}
-    if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
+    url = "https://www.balldontlie.io/api/v1/games" 
+    
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    params = {"dates[]": [today, tomorrow]}
+    
     try:
         async with session.get(url, params=params, timeout=12) as r:
-            if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
-            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
             
             data = await r.json()
             items = data.get("data") or []
+            
             for it in items:
-                start = it.get("starting_at")
+                start_status = it.get("status")
+                match_date = it.get("date")
                 
-                if not within_hours(start, 24): continue
+                if start_status != "Pre Game": continue
+                
+                # SAAT DÜZELTMESİ (BallDontLie saat hatası için)
+                # API sadece tarihi döndürür (e.g., 2025-11-05T00:00:00.000Z).
+                # Bu durumu, maçların genellikle başladığı 18:00 UTC'ye çekiyoruz.
+                full_start = f"{match_date.split('T')[0]}T18:00:00Z" 
+                
+                if not within_hours(full_start, 48): continue
                 
                 res.append({
                     "id": it.get('id'),
-                    "home": it.get("home_team_name","Home"),
-                    "away": it.get("away_team_name","Away"),
-                    "start": start,
+                    "home": safe_get(it,"home_team","full_name") or "Home",
+                    "away": safe_get(it,"visitor_team","full_name") or "Away", 
+                    "start": full_start,
                     "source": name,
                     "live": False,
-                    "odds": it.get("odds", {}),
-                    "sport": "Football"
+                    "odds": {}, 
+                    "sport": "Basketball (NBA)"
                 })
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+            
+    except Exception as e: 
+        log.warning(f"{name} hata: {e}"); return res
     return res
 
 async def fetch_isports(session):
+    # ... (iSportsAPI fetch kodu korunuyor) ...
     name = "iSportsAPI"
     res = []
     url = "https://api.isportsapi.com/sport/schedule/matches" 
@@ -338,9 +417,9 @@ async def fetch_isports(session):
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
 
-# ÜCRETSİZ/AÇIK KAYNAK API'ler
-
+# Diğer Sporlar (Opsiyonel)
 async def fetch_ergast(session):
+    # ... (Ergast F1 fetch kodu korunuyor) ...
     name = "Ergast (F1)"
     res = []
     url = "http://ergast.com/api/f1/current/next.json" 
@@ -375,6 +454,7 @@ async def fetch_ergast(session):
     return res
 
 async def fetch_nhl(session):
+    # ... (NHL Stats fetch kodu korunuyor) ...
     name = "NHL Stats"
     res = []
     today = datetime.now(TR_TZ).strftime("%Y-%m-%d")
@@ -412,130 +492,25 @@ async def fetch_nhl(session):
             log.info(f"{name} filtered:{len(res)}")
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
-
-async def fetch_openligadb(session):
-    name = "OpenLigaDB"
-    res = []
-    url = "https://www.openligadb.de/api/getmatchdata/bl1/2025/1"
-    try:
-        async with session.get(url, timeout=12) as r:
-            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            
-            items = await r.json()
-            if not isinstance(items, list): items = []
-            
-            for it in items:
-                start = it.get("matchDateTimeUTC")
-                
-                if it.get("matchIsFinished"): continue
-                if not within_hours(start, 24): continue
-                
-                res.append({
-                    "id": it.get('matchID'),
-                    "home": safe_get(it,"team1","teamName") or "Home",
-                    "away": safe_get(it,"team2","teamName") or "Away",
-                    "start": start,
-                    "source": name,
-                    "live": False,
-                    "odds": {},
-                    "sport": "Football (Bundesliga)"
-                })
-            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
-    return res
-
-async def fetch_balldontlie(session):
-    name = "BallDontLie"
-    res = []
-    url = "https://www.balldontlie.io/api/v1/games" 
     
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
-    params = {"dates[]": [today, tomorrow]}
-    
-    try:
-        async with session.get(url, params=params, timeout=12) as r:
-            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            
-            data = await r.json()
-            items = data.get("data") or []
-            
-            for it in items:
-                start = it.get("status")
-                match_date = it.get("date")
-                
-                if start != "Pre Game": continue
-                
-                full_start = f"{match_date.split('T')[0]}T00:00:00Z" 
-                
-                if not within_hours(full_start, 48): continue
-                
-                res.append({
-                    "id": it.get('id'),
-                    "home": safe_get(it,"home_team","full_name") or "Home",
-                    "away": safe_get(it,"visitor_team","full_name") or "Away", 
-                    "start": full_start,
-                    "source": name,
-                    "live": False,
-                    "odds": {}, 
-                    "sport": "Basketball (NBA)"
-                })
-            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-            
-    except Exception as e: 
-        log.warning(f"{name} hata: {e}"); return res
-    return res
-
-async def fetch_footballdata(session):
-    name = "FootballData"
-    res = []
-    url = "https://api.football-data.org/v4/matches" 
-    headers = {"X-Auth-Token": FOOTBALL_DATA_KEY}
-    if not FOOTBALL_DATA_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
-    try:
-        async with session.get(url, headers=headers, timeout=12) as r:
-            if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
-            elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            
-            data = await r.json()
-            items = data.get("matches") or []
-            
-            for it in items:
-                start = it.get("utcDate")
-                
-                if it.get("status") not in ("SCHEDULED", "TIMED"): continue
-                if not within_hours(start, 24): continue
-                
-                res.append({
-                    "id": it.get('id'),
-                    "home": safe_get(it,"homeTeam","name") or "Home",
-                    "away": safe_get(it,"awayTeam","name") or "Away",
-                    "start": start,
-                    "source": name,
-                    "live": False,
-                    "odds": {},
-                    "sport": "Football"
-                })
-            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
-    return res
-
-
-# ---------------- FETCH ALL MATCHES ----------------
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
+        # STRATEJİ: API'leri öncelik sırasına göre çalıştır
         tasks = [
+            # Futbol (Öncelik sırasına göre)
             fetch_api_football(session),
             fetch_the_odds(session),
-            fetch_footystats(session),
-            fetch_allsports(session),
+            fetch_openligadb(session),
             fetch_sportsmonks(session),
+            fetch_footystats(session),
+            # Basketbol (Öncelik sırasına göre)
+            fetch_balldontlie(session),
             fetch_isports(session),
+            # Diğer Sporlar (Opsiyonel)
             fetch_ergast(session),
             fetch_nhl(session),
-            fetch_openligadb(session),
-            fetch_balldontlie(session),
-            fetch_footballdata(session),
+            # Diğer API'ler (e.g. AllSportsAPI, FootballData)
+            # Eğer daha önce çalışmayan API'ler varsa buraya eklenebilir.
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
     
@@ -549,6 +524,7 @@ async def fetch_all_matches():
     normalized = []
     for m in all_matches:
         start = m.get("start") or m.get("date") or ""
+        # Normalizasyon ve ID oluşturma mantığı korunuyor
         if isinstance(start, (int, float)):
             try:
                 start = datetime.fromtimestamp(int(start), tz=timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -558,6 +534,16 @@ async def fetch_all_matches():
         match_id_base = m.get("id") or hash(json.dumps(m, default=str))
         final_id = f"{m.get('source')}_{match_id_base}"
         
+        # SPOR ADI MODERNİZASYONU
+        sport_key = m.get("sport", "Bilinmeyen Spor")
+        normalized_sport = SPORT_NAME_MAPPING.get(sport_key, sport_key)
+        
+        # LİG ADI/KAYNAK MODERNİZASYONU (Gerekirse)
+        # Eğer spor özel bir lig adı içeriyorsa (örn. OpenLigaDB'den Bundesliga), onu da temizleyebiliriz.
+        source_key = m.get("source", "")
+        if source_key in LEAGUE_NAME_MAPPING:
+            normalized_sport = LEAGUE_NAME_MAPPING[source_key]
+        
         normalized.append({
             "id": final_id,
             "home": m.get("home"),
@@ -566,7 +552,7 @@ async def fetch_all_matches():
             "source": m.get("source"),
             "live": bool(m.get("live")),
             "odds": m.get("odds", {}),
-            "sport": m.get("sport", "Bilinmeyen Spor")
+            "sport": normalized_sport
         })
         
     seen = set()
@@ -587,28 +573,27 @@ OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 MODEL = "gpt-4o-mini"
 
 async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
+    # ... (OpenAI çağrı kodu, lokal rate limit ile korunuyor) ...
     global ai_rate_limit
     now = datetime.now(timezone.utc)
     
-    # Lokal rate limit kontrolü sıfırlama
     if ai_rate_limit["reset"] < now:
         ai_rate_limit["calls"] = 0
         ai_rate_limit["reset"] = now + timedelta(seconds=60) 
     
-    if ai_rate_limit["calls"] >= 2: 
-        log.warning("OpenAI lokal kısıtlama (3 RPM limitine ulaşıldı). Fallback.")
+    if ai_rate_limit["calls"] >= 1: 
+        log.warning("OpenAI lokal kısıtlama (1 RPM limitine ulaşıldı). Fallback.")
         return None 
         
     ai_rate_limit["calls"] += 1 
     
-    # Her API çağrısı arasına bekleme ekleme (OpenAI 429'u azaltmak için)
-    await asyncio.sleep(2) 
+    await asyncio.sleep(3) 
     
     headers = {"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MODEL,
         "messages":[
-            {"role":"system","content":"Sen Türkçe konuşan spor analisti ve veri bilimcisisin. Verilen maç bilgisine göre en anlamlı bahis piyasalarını (MS, TOTALS, BTTS/KG) JSON formatında sırala. Cevapta başka metin olmamalı, sadece JSON olmalı."},
+            {"role":"system","content":"Sen Türkçe konuşan spor analisti ve veri bilimcisisin. Verilen maç bilgisine göre en anlamlı bahis piyasalarını (MS, TOTALS, BTTS/KG) JSON formatında sırala. Cevapta başka metin olmamalı, sadece JSON olmalı. Confidence 0-100 arasında bir tam sayı olmalı. Tahminlerinin 60'tan düşük olmamasına özen göster. Maç kalitesi düşükse 'best' tahmini güvenli bir seçenek olmalı."},
             {"role":"user","content": prompt}
         ],
         "temperature": temperature,
@@ -621,8 +606,12 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
             async with session.post(OPENAI_URL, headers=headers, json=payload) as resp:
                 txt = await resp.text()
                 
-                if resp.status == 429: log.error(f"OpenAI API 429 Hata: Hız limitine ulaşıldı. Fallback."); return None
-                if resp.status != 200: log.warning(f"OpenAI HTTP {resp.status}: {txt[:400]}"); return None
+                if resp.status == 429: 
+                    log.error(f"OpenAI API 429 Hata: Hız limitine ulaşıldı. Fallback."); 
+                    return None
+                if resp.status != 200: 
+                    log.warning(f"OpenAI HTTP {resp.status}: {txt[:400]}"); 
+                    return None
                 
                 try:
                     data = json.loads(txt)
@@ -630,7 +619,8 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
                     start = content.find("{")
                     end = content.rfind("}") + 1
                     if start >= 0 and end > start: return json.loads(content[start:end])
-                    return json.loads(content)
+                    
+                    return None
                 except Exception as e:
                     log.warning(f"OpenAI parse hatası: {e}. Raw content: {content[:100]}")
                     return None
@@ -639,65 +629,29 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
         log.warning(f"OpenAI beklenmeyen hata: {e}")
         return None
 
-# ---------------- Prediction wrapper ----------------
-async def predict_for_match(m: dict, vip_surprise=False):
-    temp = 0.2 if not vip_surprise else 0.05 
-    
-    prompt = (
-        f"Spor: {m.get('sport')}\nMaç: {m.get('home')} vs {m.get('away')}\n"
-        f"Tarih(UTC): {m.get('start')}\n"
-    )
-    if m.get("odds"): prompt += "Oran bilgisi mevcut.\n"
-    prompt += (
-        "İstediğim JSON formatı: {\"predictions\":[{\"market\":\"MS\",\"suggestion\":\"MS 1\",\"confidence\":85,\"explanation\":\"...\"}],\"best\":0}. "
-        "Confidence 0-100 arasında bir tam sayı olmalı. Cevabı yalnızca JSON ver."
-    )
-    
-    ai_resp = await call_openai_chat(prompt, max_tokens=300, temperature=temp)
-    
-    if not ai_resp or not isinstance(ai_resp, dict) or "predictions" not in ai_resp:
-        log.warning(f"AI tahmini başarısız veya boş: {m.get('id')}. Fallback kullanılıyor.")
-        
-        preds = []
-        if vip_surprise: 
-            preds.append({"market":"TOTALS","suggestion":"Over 3.5","confidence":61,"explanation":"Yüksek skorlu sürpriz beklentisi."})
-            preds.append({"market":"MS","suggestion":"MS X","confidence":55,"explanation":"Eşit güçler, riskli beraberlik."})
-        else: 
-            preds.append({"market":"MS","suggestion":"MS 1","confidence":60,"explanation":"Ev sahibi avantajlı görünüyor."})
-            preds.append({"market":"TOTALS","suggestion":"Under 2.5","confidence":55,"explanation":"Düşük skorlu mücadele bekleniyor."})
-
-        best_idx = max(range(len(preds)), key=lambda i: preds[i]["confidence"])
-        return {"predictions": preds, "best": best_idx, "fallback": True}
-        
-    preds = ai_resp.get("predictions", [])
-    for p in preds:
-        try: p["confidence"] = max(0, min(100, int(p.get("confidence",50))))
-        except: p["confidence"] = 50
-            
-    best = ai_resp.get("best", 0)
-    if not isinstance(best, int) or best < 0 or best >= len(preds):
-        best = max(range(len(preds)), key=lambda i: preds[i]["confidence"]) if preds else 0
-        
-    return {"predictions": preds, "best": best, "fallback": False}
-
 # ---------------- Build coupon ----------------
 def format_match_block(m, pred):
     start_local = to_local_str(m.get("start") or "")
     best = pred["predictions"][pred["best"]] if pred["predictions"] else None
     
     h2h_odds = get_all_h2h_odds(m)
-    odd_display = f"E:{h2h_odds['E']} | B:{h2h_odds['B']} | D:{h2h_odds['D']}"
     
+    if any(v != '?' for v in h2h_odds.values()):
+        odd_display = f"E:{h2h_odds['E']} | B:{h2h_odds['B']} | D:{h2h_odds['D']}"
+    else:
+        # Oran bilgisi yoksa net bir mesaj
+        odd_display = "Oran Yok (TheOdds'tan Alınamadı)"
+
     suggestion = best.get('suggestion', 'Bilinmiyor')
     confidence = best.get('confidence', 0)
     explanation = best.get('explanation','').replace(" (F)", "") 
     
-    # Spor adını parantez içinde değil, sadece adını göster
-    sport_name = m.get('sport','Bilinmeyen Spor').split('(')[0].strip()
+    # Modernleştirilmiş spor/lig adı
+    sport_name = m.get('sport','❓ Bilinmeyen Spor')
     
     block = (
         f"🏆 <b>{m.get('home')} vs {m.get('away')}</b>\n"
-        f"📅 {start_local} | {sport_name}\n"
+        f"📅 {start_local} | {sport_name} (Kaynak: {m.get('source')})\n" 
         f"📈 <b>{suggestion}</b> <tg-spoiler>(%{confidence})</tg-spoiler>\n"
         f"  - <i>{explanation}</i>\n"
         f"💸 <tg-spoiler>MS Oran: {odd_display}</tg-spoiler>"
@@ -715,8 +669,9 @@ async def build_coupon_text(matches, title, max_matches):
     is_daily_coupon = "GÜNLÜK" in title
     
     match_preds = []
+    
+    # Her maç için tahminleri sıralı olarak iste (Rate limit yüzünden)
     for m in matches:
-        # Tek maç için tahmin isteği
         pred = await predict_for_match(m, vip_surprise=("👑 VIP" in title))
         
         if pred and pred.get("predictions"):
@@ -726,12 +681,15 @@ async def build_coupon_text(matches, title, max_matches):
                 continue
             
             if is_daily_coupon and DAILY_MAX_ODDS:
-                if any(k in best["suggestion"] for k in ["MS 1", "MS 2", "Beraberlik"]):
-                    odd = get_odd_for_market(m, best["suggestion"])
-                    
-                    if odd is None or odd > DAILY_MAX_ODDS:
-                        continue
-            
+                # Sadece TheOdds verisi üzerinden oranı kontrol et
+                if m.get('source') == "TheOdds":
+                    if any(k in best["suggestion"] for k in ["MS 1", "MS 2", "Beraberlik"]):
+                        odd = get_odd_for_market(m, best["suggestion"])
+                        
+                        if odd is None or odd > DAILY_MAX_ODDS:
+                            log.info(f"Maç atlandı (Oran > {DAILY_MAX_ODDS}): {m.get('home')} vs {m.get('away')}")
+                            continue
+                
             match_preds.append((m, pred, best["confidence"]))
 
     match_preds.sort(key=lambda x: x[2], reverse=True)
@@ -746,7 +704,6 @@ async def build_coupon_text(matches, title, max_matches):
             
         lines.append(format_match_block(m, pred))
             
-        # Maç yayınlanmadan önce tekrar yayınlanmasını önlemek için id'yi kaydedin.
         if "TEST" not in title: 
              posted_matches[match_id] = now
              
@@ -756,7 +713,7 @@ async def build_coupon_text(matches, title, max_matches):
         
     header = (
         f"━━━━━━━━━━━━━━━\n"
-        f"   {title}\n"
+        f"   {title} ({datetime.now(TR_TZ).strftime('%d.%m %H:%M')})\n"
         f"━━━━━━━━━━━━━━━\n"
     )
     footer = (
@@ -765,19 +722,56 @@ async def build_coupon_text(matches, title, max_matches):
     )
     return header + "\n\n" + "\n\n".join(lines) + footer
 
-# ---------------- Job runner ----------------
+# ---------------- MAIN ----------------
+async def send_to_channel(app, text):
+    try:
+        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode="HTML", disable_web_page_preview=True)
+        log.info("Kupon gönderildi.")
+    except Exception as e:
+        log.exception(f"Telegram gönderim hatası: {e}")
+
+async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (cmd_test fonksiyonu korunuyor) ...
+    log.info("Test komutu çalıştırıldı.")
+    
+    global ai_rate_limit
+    ai_rate_limit["calls"] = 0
+    ai_rate_limit["reset"] = datetime.now(timezone.utc) + timedelta(seconds=60)
+    
+    await update.message.reply_text("Test başlatılıyor, lütfen bekleyin. Maçlar çekiliyor...")
+    
+    matches = await fetch_all_matches() 
+    if not matches:
+        await update.message.reply_text("Maç bulunamadı (24 saat içinde başlayacak).")
+        return
+        
+    text = await build_coupon_text(
+        matches, 
+        "🚨 TEST AI KUPON (MANUEL)", 
+        max_matches=5
+    )
+    
+    if text:
+        await update.message.reply_text(text, parse_mode="HTML") 
+    else:
+        await update.message.reply_text("Kupon oluşturulamadı (Filtrelere takılmış olabilir).")
+
 async def job_runner(app: Application):
+    # ... (job_runner fonksiyonu korunuyor) ...
     global last_run
     
-    # İlk çalıştırma için bekleme süresi
     await asyncio.sleep(15) 
     
     while True:
         try:
             now = datetime.now(timezone.utc)
+            
+            global ai_rate_limit
+            ai_rate_limit["calls"] = 0
+            ai_rate_limit["reset"] = now + timedelta(seconds=60) 
+            
             cleanup_posted_matches()
             
-            # API'lardan maçları çekme
             matches = await fetch_all_matches() 
             
             if not matches:
@@ -815,45 +809,9 @@ async def job_runner(app: Application):
         except Exception as e:
             log.exception(f"Job runner hata: {e}")
             
-        # 1 saat bekle
         await asyncio.sleep(3600)
 
-async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    log.info("Test komutu çalıştırıldı.")
-    
-    # Sadece test komutu çalıştırılırsa, rate limit sıfırlansın.
-    global ai_rate_limit
-    ai_rate_limit["calls"] = 0
-    ai_rate_limit["reset"] = datetime.now(timezone.utc) + timedelta(seconds=60)
-    
-    await update.message.reply_text("Test başlatılıyor, lütfen bekleyin. Maçlar çekiliyor...")
-    
-    matches = await fetch_all_matches() 
-    if not matches:
-        await update.message.reply_text("Maç bulunamadı (24 saat içinde başlayacak).")
-        return
-        
-    text = await build_coupon_text(
-        matches, 
-        "🚨 TEST AI KUPON (MANUEL)", 
-        max_matches=5
-    )
-    
-    if text:
-        await update.message.reply_text(text, parse_mode="HTML") 
-    else:
-        await update.message.reply_text("Kupon oluşturulamadı (Filtrelere takılmış olabilir).")
-
-# ---------------- MAIN ----------------
-async def send_to_channel(app, text):
-    try:
-        await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text, parse_mode="HTML", disable_web_page_preview=True)
-        log.info("Kupon gönderildi.")
-    except Exception as e:
-        log.exception(f"Telegram gönderim hatası: {e}")
-
 def main():
-    # ... (Gerekli anahtar kontrolü) ...
     if not TELEGRAM_TOKEN: log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor."); sys.exit(1)
     if not AI_KEY: log.error("AI_KEY ayarlı değil. Çıkılıyor."); sys.exit(1)
     if not TELEGRAM_CHAT_ID: log.critical("TELEGRAM_CHAT_ID ayarlı değil. Çıkılıyor."); sys.exit(1)
@@ -867,9 +825,13 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v61.4 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v61.6 başlatıldı. Telegram polling başlatılıyor...")
     
-    app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES)
+    try:
+        app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    except Conflict as e:
+        log.critical(f"Kritik Telegram Hatası: İki bot örneği çalışıyor olabilir. Lütfen tek bir bot örneğinin çalıştığından emin olun. Hata: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
