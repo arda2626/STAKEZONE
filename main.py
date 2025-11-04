@@ -1,4 +1,4 @@
-# main.py — v62.1 (Eksiksiz Kod, Format, Zamanlama ve API-Football Key Güncel)
+# main.py — v62.2 (Eksiksiz Kod, Format, Zamanlama ve API-Football Key Güncel)
 
 import os
 import asyncio
@@ -17,7 +17,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.1") 
+log = logging.getLogger("v62.2") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -29,11 +29,11 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2" 
 THE_ODDS_API_KEY = "501ea1ade60d5f0b13b8f34f90cd51e6" 
 ALLSPORTSAPI_KEY = "27b16a330f4ac79a1f8eb383fec049b9cc0818d5e33645d771e2823db5d80369"
-SPORTSMONKS_KEY = "AirVTC8HLItQs55iaXp9TnZ45fdQiK6ecwFFgNavnHSIQxabupFbTrHED7FJ"
-ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
-FOOTYSTATS_KEY = "test85g57" 
+SPORTSMONKS_KEY = "AirVTC8HLItQs55iaXp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ" # Dummy key
+ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" # Dummy key
+FOOTYSTATS_KEY = "test85g57" # Dummy key
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
-FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "").strip() # Yeni eklenen key
+FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "").strip() 
 
 # Türkiye zaman dilimi (UTC+3)
 TR_TZ = timezone(timedelta(hours=3))
@@ -44,7 +44,7 @@ VIP_INTERVAL_HOURS = 3        # 3 saatte bir
 DAILY_INTERVAL_HOURS = 12     # 12 saatte bir (günde 2 defa)
 VIP_MAX_MATCHES = 1           # Sadece 1 maç
 DAILY_MAX_MATCHES = 3         # Max 3 maç
-DAILY_MAX_ODDS = 3.0          
+DAILY_MAX_ODDS = 2.0          # GARANTİ Kupon için Oran Max limiti DÜŞÜRÜLDÜ
 MIN_CONFIDENCE = 60       
 
 # OpenAI Limit - GEVŞETİLDİ (1 RPM -> 5 RPM)
@@ -778,14 +778,15 @@ async def build_coupon_text(matches, title, max_matches):
             if best["confidence"] < MIN_CONFIDENCE:
                 continue
             
-            # Günlük kupon oran filtresi
+            # Günlük kupon oran filtresi (Şimdi sadece Garanti/Düşük Oran için kullanılır)
             if is_daily_coupon and DAILY_MAX_ODDS:
                 if m.get('source') == "TheOdds": # Sadece TheOdds'tan gelen maçlarda oran filtresi
                     if any(k in best["suggestion"] for k in ["MS 1", "MS 2", "Beraberlik", "MS 0", "MS X"]):
                         odd = get_odd_for_market(m, best["suggestion"])
                         
-                        if odd is None or odd > DAILY_MAX_ODDS:
-                            log.info(f"Maç atlandı (Oran > {DAILY_MAX_ODDS}): {m.get('home')} vs {m.get('away')}")
+                        # Eğer oran yoksa (None) veya oran üst limitten (2.0) büyükse atla
+                        if odd is None or odd > DAILY_MAX_ODDS: 
+                            log.info(f"Maç atlandı (Oran > {DAILY_MAX_ODDS} veya Oran Yok): {m.get('home')} vs {m.get('away')}")
                             continue
                 
             match_preds.append((m, pred, best["confidence"]))
@@ -899,7 +900,7 @@ async def initial_runs_scheduler(app: Application, all_matches):
     
     text_daily = await build_coupon_text(
         all_matches, 
-        "🗓️ GÜNLÜK AI SEÇİMİ (Oran Max 3.0)", 
+        "✅ GÜNLÜK GARANTİ AI SEÇİMİ", # BAŞLIK GÜNCELLENDİ
         max_matches=DAILY_MAX_MATCHES
     )
     if text_daily:
@@ -960,7 +961,7 @@ async def job_runner(app: Application):
                 
                 text = await build_coupon_text(
                     all_matches, 
-                    "🗓️ GÜNLÜK AI SEÇİMİ (Oran Max 3.0)", 
+                    "✅ GÜNLÜK GARANTİ AI SEÇİMİ", # BAŞLIK GÜNCELLENDİ
                     max_matches=DAILY_MAX_MATCHES
                 )
                 if text:
@@ -1001,7 +1002,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.1 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.2 başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
