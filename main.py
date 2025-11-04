@@ -1,4 +1,4 @@
-# main.py — v61.3 (Syntax Error Fix)
+# main.py — v61.4 (Rate Limit Fix)
 
 import os
 import asyncio
@@ -12,10 +12,12 @@ import aiohttp
 from aiohttp import ClientError
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+# Yeni import: SSL Hatası Yönetimi İçin
+import ssl 
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v61.3") 
+log = logging.getLogger("v61.4") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -147,7 +149,6 @@ async def fetch_api_football(session):
         async with session.get(url, params=params, headers=headers, timeout=12) as r:
             if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Çalışmıyor/Kısıtlı)."); return res
-            if r.status != 200: return res
             
             data = await r.json()
             items = data.get("response") or []
@@ -183,7 +184,6 @@ async def fetch_the_odds(session):
         async with session.get(url, params=params, timeout=12) as r:
             if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}"); return res
-            if r.status != 200: return res
             
             data = await r.json()
             if isinstance(data, list):
@@ -216,7 +216,6 @@ async def fetch_footystats(session):
         async with session.get(url, params=params, timeout=12) as r:
             if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            if r.status != 200: return res
             
             data = await r.json()
             items = data.get("data") or []
@@ -251,7 +250,6 @@ async def fetch_allsports(session):
         async with session.get(url, headers=headers, timeout=12) as r:
             if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            if r.status != 200: return res
             
             data = await r.json()
             items = data.get("result") or []
@@ -284,7 +282,6 @@ async def fetch_sportsmonks(session):
         async with session.get(url, params=params, timeout=12) as r:
             if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            if r.status != 200: return res
             
             data = await r.json()
             items = data.get("data") or []
@@ -317,7 +314,6 @@ async def fetch_isports(session):
         async with session.get(url, params=params, timeout=12) as r:
             if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
-            if r.status != 200: return res
             
             data = await r.json()
             items = data.get("data") or []
@@ -338,6 +334,7 @@ async def fetch_isports(session):
                     "sport": it.get("sportType", "Bilinmeyen")
                 })
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+    except ssl.SSLCertVerificationError as e: log.warning(f"{name} hata: SSL sertifika hatası (Geçici olarak atlanıyor)."); return res
     except Exception as e: log.warning(f"{name} hata: {e}"); return res
     return res
 
@@ -476,7 +473,6 @@ async def fetch_balldontlie(session):
                 res.append({
                     "id": it.get('id'),
                     "home": safe_get(it,"home_team","full_name") or "Home",
-                    # Hata giderildi: Fazla parantez kaldırıldı.
                     "away": safe_get(it,"visitor_team","full_name") or "Away", 
                     "start": full_start,
                     "source": name,
@@ -594,6 +590,7 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
     global ai_rate_limit
     now = datetime.now(timezone.utc)
     
+    # Lokal rate limit kontrolü sıfırlama
     if ai_rate_limit["reset"] < now:
         ai_rate_limit["calls"] = 0
         ai_rate_limit["reset"] = now + timedelta(seconds=60) 
@@ -603,6 +600,9 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
         return None 
         
     ai_rate_limit["calls"] += 1 
+    
+    # Her API çağrısı arasına bekleme ekleme (OpenAI 429'u azaltmak için)
+    await asyncio.sleep(2) 
     
     headers = {"Authorization": f"Bearer {AI_KEY}", "Content-Type": "application/json"}
     payload = {
@@ -716,7 +716,9 @@ async def build_coupon_text(matches, title, max_matches):
     
     match_preds = []
     for m in matches:
+        # Tek maç için tahmin isteği
         pred = await predict_for_match(m, vip_surprise=("👑 VIP" in title))
+        
         if pred and pred.get("predictions"):
             best = pred["predictions"][pred["best"]]
             
@@ -775,6 +777,7 @@ async def job_runner(app: Application):
             now = datetime.now(timezone.utc)
             cleanup_posted_matches()
             
+            # API'lardan maçları çekme
             matches = await fetch_all_matches() 
             
             if not matches:
@@ -817,6 +820,12 @@ async def job_runner(app: Application):
 
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Test komutu çalıştırıldı.")
+    
+    # Sadece test komutu çalıştırılırsa, rate limit sıfırlansın.
+    global ai_rate_limit
+    ai_rate_limit["calls"] = 0
+    ai_rate_limit["reset"] = datetime.now(timezone.utc) + timedelta(seconds=60)
+    
     await update.message.reply_text("Test başlatılıyor, lütfen bekleyin. Maçlar çekiliyor...")
     
     matches = await fetch_all_matches() 
@@ -858,7 +867,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v61.3 başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v61.4 başlatıldı. Telegram polling başlatılıyor...")
     
     app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES)
 
