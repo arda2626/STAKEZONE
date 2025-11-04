@@ -1,4 +1,4 @@
-# main.py — v40.5 (Kritik hata düzeltmesi)
+# main.py — v40.6 (Event Loop çakışması düzeltildi)
 # Gereken env:
 #   AI_KEY -> OpenAI API Key (zorunlu)
 #   TELEGRAM_TOKEN -> Telegram bot token (zorunlu)
@@ -9,7 +9,7 @@ import asyncio
 import logging
 import json
 import random
-import sys # Yeni import
+import sys
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -20,16 +20,11 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # ---------------- CONFIG ----------------
 # Log formatı eklendi
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v40.5")
+log = logging.getLogger("v40.6")
 
 AI_KEY = os.getenv("AI_KEY", "").strip()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()  # "@channel" veya chat id
-
-if not AI_KEY:
-    log.error("AI_KEY ortamda bulunamadı. Lütfen AI_KEY ayarla.")
-if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    log.error("TELEGRAM_TOKEN veya TELEGRAM_CHAT_ID ayarlı değil. Telegram gönderimi çalışmaz.")
 
 # Sabit (isteğin üzerine) API keyler - kod içinde kalacak
 API_FOOTBALL_KEY = "bd1350bea151ef9f56ed417f0c0c3ea2"
@@ -88,7 +83,7 @@ def safe_get(d, *keys):
     for k in keys:
         if not isinstance(cur, dict):
             return None
-        cur = cur = cur.get(k)
+        cur = cur.get(k)
     return cur
 
 def cleanup_posted_matches():
@@ -370,6 +365,7 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
         ai_rate_limit["calls"] = 0
         ai_rate_limit["reset"] = now + timedelta(seconds=60) 
     
+    # Yerel kısıtlama (API'nin limitlerine uygun ayarlayın)
     if ai_rate_limit["calls"] >= 45: 
         log.warning("OpenAI local throttle active")
         wait_time = (ai_rate_limit["reset"] - now).total_seconds() + 1
@@ -408,6 +404,7 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
                     else:
                         content = txt
                         
+                    # AI'dan gelen JSON metin içinde olabilir, temizle
                     start = content.find("{")
                     end = content.rfind("}") + 1
                     if start >= 0 and end > start:
@@ -541,7 +538,7 @@ async def build_coupon_text(matches, title, max_matches=3):
             log.info(f"Maç atlandı (zaten yayınlandı): {m.get('home')} vs {m.get('away')}")
             continue
             
-        pred = await predict_for_match(m, vip=(title.startswith("VIP")))
+        pred = await predict_for_match(m, vip=(title.startswith("👑 VIP")))
         
         if pred.get("predictions"):
             lines.append(format_match_block(m, pred))
@@ -568,7 +565,7 @@ async def send_to_channel(app, text):
         log.exception(f"Telegram gönderim hatası: {e}")
 
 # ---------------- Job runner ----------------
-async def job_runner(app):
+async def job_runner(app: Application):
     """Belirli aralıklarla maçları çeken ve tahminleri yayınlayan ana döngü."""
     global last_run
     
@@ -642,14 +639,15 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = await build_coupon_text(test_matches, "🚨 TEST AI TAHMİN (MANUEL)", max_matches=5)
     
     if text:
-        await update.message.reply_text(text, parse_mode="HTML")
-        # Kanala göndermek istenirse aşağıdaki satırı kaldırın:
-        # await send_to_channel(context.bot, text)
+        # Mesajı /test komutunun geldiği sohbete gönder
+        await update.message.reply_text(text, parse_mode="HTML") 
+        
     else:
         await update.message.reply_text("Kupon oluşturulamadı.")
 
 # ---------------- MAIN ----------------
-async def main():
+# main fonksiyonu artık async DEĞİLDİR ve asyncio.run() tarafından çağrılmaz.
+def main():
     if not TELEGRAM_TOKEN:
         log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor.")
         sys.exit(1)
@@ -660,18 +658,26 @@ async def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
     
-    asyncio.create_task(job_runner(app))
+    # KRİTİK DEĞİŞİKLİK: Job runner'ı bot hazır olduktan sonra başlatmak için post_init kullanıyoruz.
+    async def post_init_callback(application: Application):
+        # job_runner'ı ayrı bir görev (task) olarak başlat
+        asyncio.create_task(job_runner(application))
+        log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
+
+    app.post_init = post_init_callback
     
-    log.info("v40.5 başlatıldı — job runner çalışıyor. Telegram polling başlatılıyor.")
+    log.info("v40.6 başlatıldı. Telegram polling başlatılıyor...")
     
-    # run_polling, botun ana döngüsüdür.
-    await app.run_polling(poll_interval=1.0)
+    # run_polling() fonksiyonu kendi event loop'unu yönetir ve programı bloke eder.
+    app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
-        # asyncio.run() ana asenkron döngüyü yönetir.
-        asyncio.run(main())
+        
+        # Sadece senkron main() fonksiyonunu çağırıyoruz. asyncio.run() KALDIRILDI.
+        main() 
         
     except KeyboardInterrupt:
         log.info("Durduruldu.")
