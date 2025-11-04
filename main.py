@@ -1,4 +1,4 @@
-# main.py - v22.0 (KISA + TEK KUPON + HEMEN ATAR + TERCİH + ORAN)
+# main.py - v22.1 (ÇALIŞIR + LIFESPAN + TEK KUPON + ORAN)
 import asyncio, logging, random
 from datetime import datetime, timedelta, timezone
 from telegram.ext import Application, CommandHandler
@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
 
-# GÜNCEL API KEY'LER
+# API KEY'LER
 THE_ODDS_API_KEY = "501ea1ade60d5f0b13b8f34f90cd51e6"
 API_FOOTBALL_KEY = "bd1350bea151ef9f56ed417f0c0c3ea2"
 BALLDONTLIE_KEY = ""
@@ -20,15 +20,15 @@ TR_TIME = timezone(timedelta(hours=3))
 NOW_UTC = datetime.now(timezone.utc)
 
 # KONTROL
-posted_matches = {}  # {match_id: last_sent_time}
-last_coupon_time = {"hourly": None, "daily": None, "vip": None}
+posted_matches = {}
+last_coupon_time = {"CANLI KUPON": None, "GÜNLÜK KUPON": None, "VIP KUPON": None}
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger()
 
 # KISA BANNER
 def banner(title):
-    return f"STAKEZONE AI v22.0\n\n      {title}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    return f"STAKEZONE AI v22.1\n\n      {title}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # API ÇEKME
 async def fetch_matches(max_hours_ahead=0):
@@ -100,7 +100,8 @@ async def build_coupon(min_conf, title, max_hours, interval_hours):
     now = datetime.now(TR_TIME)
 
     # ZAMAN KONTROLÜ
-    if last_coupon_time[title] and (now - last_coupon_time[title]).total_seconds() < interval_hours * 3600:
+    last_time = last_coupon_time.get(title)
+    if last_time and (now - last_time).total_seconds() < interval_hours * 3600:
         log.info(f"{title} bekleniyor...")
         return None
 
@@ -127,12 +128,17 @@ async def build_coupon(min_conf, title, max_hours, interval_hours):
     start_str = match["start"].astimezone(TR_TIME).strftime('%d %B %H:%M')
     total_odds = best[1]
 
+    # GÜNLÜK KUPONDA ORAN TOPLAMI
+    extra = ""
+    if title == "GÜNLÜK KUPON":
+        extra = f"\nKazanma Oranı: <b>{total_odds:.2f}</b>"
+
     return (
         f"{banner(title)}\n"
         f"<b>{match['home']} vs {match['away']}</b>\n"
         f"{start_str}\n"
         f"{best[2]} | Oran: <b>{total_odds:.2f}</b>\n"
-        f"AI GÜVEN: <b>%{int(best[0]*100)}</b>\n"
+        f"AI GÜVEN: <b>%{int(best[0]*100)}</b>{extra}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"<a href='https://twitter.com/Gamblingsafe'>@Gamblingsafe</a> | "
         f"<a href='https://stake1090.com/?c=bz1hPARd'>STAKE GİRİŞ</a>\n"
@@ -146,7 +152,7 @@ async def send_coupon(ctx, min_conf, title, max_hours, interval_hours):
         await ctx.bot.send_message(CHANNEL_ID, text, parse_mode="HTML", disable_web_page_preview=True)
         log.info(f"{title} ATILDI!")
     else:
-        await ctx.bot.send_message(CHANNEL_ID, f"STAKEZONE AI v22.0\n\n      {title}\nMaç bekleniyor...\nABONE OL! @stakedrip", parse_mode="HTML")
+        await ctx.bot.send_message(CHANNEL_ID, f"STAKEZONE AI v22.1\n\n      {title}\nMaç bekleniyor...\nABONE OL! @stakedrip", parse_mode="HTML")
 
 # JOBS
 async def hourly_job(ctx): await send_coupon(ctx, 0.55, "CANLI KUPON", 0, 1)
@@ -166,15 +172,23 @@ tg.add_handler(CommandHandler("hourly", lambda u,c: hourly_job(c)))
 tg.add_handler(CommandHandler("daily", lambda u,c: daily_job(c)))
 tg.add_handler(CommandHandler("vip", lambda u,c: vip_job(c)))
 
-@app.on_event("startup")
-async def start():
+# LIFESPAN (YENİ YÖNTEM)
+async def lifespan(app: FastAPI):
+    # Başlangıç
     jq = tg.job_queue
     jq.run_repeating(hourly_job, 3600, first=5)
     jq.run_repeating(daily_job, 43200, first=20)
     jq.run_repeating(vip_job, 86400, first=30)
-    await tg.initialize(); await tg.start()
+    await tg.initialize()
+    await tg.start()
     await tg.bot.set_webhook(WEBHOOK_URL)
-    log.info("v22.0 HAZIR – KISA + TEK + TERCİH + ORAN!")
+    log.info("v22.1 HAZIR – LIFESPAN + TEK KUPON!")
+    yield
+    # Kapanış
+    await tg.stop()
+    await tg.shutdown()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.post("/stakedrip")
 async def webhook(req: Request):
