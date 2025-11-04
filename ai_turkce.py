@@ -1,37 +1,69 @@
-from openai import OpenAI
 import os
+import asyncio
+import json
+from openai import AsyncOpenAI
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OpenAI istemcisi
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-async def ai_turkce_analiz(match_data: str) -> str:
+# Ana analiz fonksiyonu
+async def ai_turkce_analiz(match):
     """
-    Maç verisini alır, GPT-4o ile kısa Türkçe analiz döndürür.
-    match_data: Örnek -> "Galatasaray vs Fenerbahçe - Son 5 maçta Galatasaray 4 galibiyet aldı."
+    Verilen maç için Türkçe AI tahmini oluşturur.
     """
     try:
-        prompt = f"""
-        Sen bir spor analisti olarak hareket et.
-        Aşağıda bir maç bilgisi var:
-        {match_data}
+        # Rate limit hatalarına karşı kısa bekleme
+        await asyncio.sleep(10)
 
-        Bu maçı 2 cümleyi geçmeyecek şekilde Türkçe analiz et.
-        Tahmin yapma, sadece veriye dayalı kısa bir gözlem yaz.
-        """
+        home = match.get("home", "Ev Sahibi")
+        away = match.get("away", "Deplasman")
+        sport = match.get("sport", "futbol")
 
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Sen deneyimli bir Türk spor analistisin."},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=40,
-            temperature=0.7,
+        prompt = (
+            f"{sport.capitalize()} maçı için kısa, istatistiksel ve tahmin odaklı bir analiz üret. "
+            f"Maç: {home} vs {away}. "
+            f"Sadece 2-3 cümlelik bir Türkçe açıklama yaz. "
+            f"Sonuç olarak en olası bahis türünü (örnek: KG VAR, ÜST, 1X, 2) belirt. "
+            f"JSON formatında yanıt ver:\n\n"
+            f'{{"suggestion": "Tahmin", "confidence": "Yüzde", "explanation": "Kısa açıklama"}}'
         )
 
-        return response.choices[0].message.content.strip()
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=150,
+        )
+
+        content = response.choices[0].message.content.strip()
+
+        # Yanıt JSON formatında mı kontrol et
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # JSON değilse düz metinden parçala
+            data = {
+                "suggestion": "AI yanıt parse edilemedi",
+                "confidence": 50,
+                "explanation": content,
+            }
+
+        return data
 
     except Exception as e:
-        print("AI analiz hatası:", e)
-        return "Analiz oluşturulamadı."
+        err = str(e).lower()
+
+        # Rate limit hatası
+        if "rate limit" in err or "rpm" in err:
+            return {
+                "suggestion": "⚠️ AI analiz sınırına ulaşıldı",
+                "confidence": 0,
+                "explanation": "Lütfen birkaç dakika sonra tekrar deneyin.",
+            }
+
+        # Diğer hatalar
+        return {
+            "suggestion": "AI analiz hatası",
+            "confidence": 0,
+            "explanation": f"Hata: {str(e)[:120]}",
+        }
