@@ -1,6 +1,6 @@
-# main.py - v24.0 (YENİ TASARIM + LİG + ÇOK TERCİH + HEM FUTBOL HEM BASKET)
+# main.py - v24.1 (HATA YOK + YENİ TASARIM + LİG + ÇOK TERCİH)
 import asyncio, logging, random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone  # EKLENDİ!
 from telegram.ext import Application, CommandHandler
 from telegram import Update
 from fastapi import FastAPI, Request
@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s"
 CHANNEL_ID = "@stakedrip"
 WEBHOOK_URL = "https://stakezone-ai.onrender.com/stakedrip"
 
-THEAPI_KEY = "501ea1ade60d5f0b13b8f34f90cd51e6"
+API_KEY = "501ea1ade60d5f0b13b8f34f90cd51e6"  # DÜZELTİLDİ
 
 TR_TIME = timezone(timedelta(hours=3))
 NOW_UTC = datetime.now(timezone.utc)
@@ -34,7 +34,7 @@ LEAGUE_NAMES = {
 # GÖZ ALICI BANNER
 def banner(title):
     return (
-        "⚡ STAKEZONE AI v24.0\n"
+        "STAKEZONE AI v24.1\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"       {title}\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -151,7 +151,7 @@ async def lifespan(app: FastAPI):
     jq.run_repeating(vip, 86400, first=30)
     await tg.initialize(); await tg.start()
     await tg.bot.set_webhook(WEBHOOK_URL)
-    log.info("v24.0 HAZIR – YENİ TASARIM!")
+    log.info("v24.1 HAZIR – HATA YOK + YENİ TASARIM!")
     yield
     await tg.stop(); await tg.shutdown()
 
