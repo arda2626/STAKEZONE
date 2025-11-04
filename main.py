@@ -1,4 +1,4 @@
-# main.py — v62.9.1 (Global Deklarasyon Hatası Giderildi)
+# main.py — v62.9.2 (Global Deklarasyon Hatası Kesin Giderildi)
 
 import os
 import asyncio
@@ -18,7 +18,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.9.1") 
+log = logging.getLogger("v62.9.2") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -241,10 +241,7 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
     return max(prices) if prices else None 
 
 # ---------------- API Fetch Fonksiyonları ----------------
-# (Fonksiyonlar aynı kaldı, yer tasarrufu için tekrar yazılmadı)
-
 async def fetch_football_data(session):
-    # ... (KOD AYNI)
     name = "Football-Data"
     res = []
     url = "https://api.football-data.org/v4/matches" 
@@ -268,7 +265,6 @@ async def fetch_football_data(session):
     return res
 
 async def fetch_api_football(session):
-    # ... (KOD AYNI)
     name = "API-Football"
     res = []
     url = "https://v3.football.api-sports.io/fixtures"
@@ -295,7 +291,6 @@ async def fetch_api_football(session):
     return res
 
 async def fetch_the_odds(session):
-    # ... (KOD AYNI)
     name = "TheOdds"
     res = []
     url = "https://api.the-odds-api.com/v4/sports/upcoming/odds" 
@@ -317,7 +312,6 @@ async def fetch_the_odds(session):
     return res
 
 async def fetch_balldontlie(session):
-    # ... (KOD AYNI)
     name = "BallDontLie"
     res = []
     url = "https://www.balldontlie.io/api/v1/games" 
@@ -342,7 +336,6 @@ async def fetch_balldontlie(session):
     return res
 
 async def fetch_openligadb(session):
-    # ... (KOD AYNI)
     name = "OpenLigaDB"
     res = []
     url = "https://www.openligadb.de/api/getmatchdata/bl1/2025/1" 
@@ -361,7 +354,6 @@ async def fetch_openligadb(session):
     return res
 
 async def fetch_sportsmonks(session):
-    # ... (KOD AYNI)
     name = "SportsMonks"
     res = []
     url = "https://api.sportmonks.com/v3/football/fixtures"
@@ -382,7 +374,6 @@ async def fetch_sportsmonks(session):
     return res
 
 async def fetch_footystats(session):
-    # ... (KOD AYNI)
     name = "FootyStats"
     res = []
     url = "https://api.footystats.org/league-matches"
@@ -403,7 +394,6 @@ async def fetch_footystats(session):
     return res
 
 async def fetch_isports(session):
-    # ... (KOD AYNI)
     name = "iSportsAPI"
     res = []
     url = "https://api.isportsapi.com/sport/schedule/matches" 
@@ -427,7 +417,6 @@ async def fetch_isports(session):
     return res
 
 async def fetch_ergast(session):
-    # ... (KOD AYNI)
     name = "Ergast (F1)"
     res = []
     url = "http://ergast.com/api/f1/current/next.json" 
@@ -449,7 +438,6 @@ async def fetch_ergast(session):
     return res
 
 async def fetch_nhl(session):
-    # ... (KOD AYNI)
     name = "NHL Stats"
     res = []
     today = datetime.now(TR_TZ).strftime("%Y-%m-%d")
@@ -793,6 +781,7 @@ async def post_coupon_after_delay(app, text, delay_minutes):
 
 # ---------------- INSTANT ANALYSIS JOB (YENİ) ----------------
 async def run_instant_analysis_job(app: Application, all_matches: list):
+    global last_run # Global deklarasyonu fonksiyonun başında
     log.info(f"Anlık Analiz döngüsü başlatılıyor. (Min %{INSTANT_ANALYSIS_MIN_CONFIDENCE} güven aranıyor)")
     
     upcoming_matches = [m for m in all_matches if not m.get("live") and within_hours(m.get("start"), 168)]
@@ -810,6 +799,7 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
             
     if not target_matches:
         log.info("Anlık Analiz için uygun maç bulunamadı (30dk-24saat aralığında).")
+        last_run["INSTANT"] = datetime.now(timezone.utc)
         return
 
     text = await build_coupon_text(
@@ -819,7 +809,6 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
         coupon_type="INSTANT"
     )
     
-    global last_run
     if text:
         await send_to_channel(app, text)
         last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
@@ -831,12 +820,12 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
 
 # ---------------- NBA COUPON JOB ----------------
 async def run_nba_coupon_job(app: Application, all_matches: list):
+    global last_run # Global deklarasyonu fonksiyonun başında
     log.info(f"NBA kupon döngüsü başlatılıyor. (Min %{NBA_MIN_CONFIDENCE} güven, Min {NBA_MIN_ODDS} oran aranıyor)")
     
     nba_matches = [m for m in all_matches if m.get("sport") == "🏀 NBA"]
     if not nba_matches:
         log.info("NBA kuponu için uygun maç bulunamadı.")
-        global last_run
         last_run["NBA"] = datetime.now(timezone.utc)
         return
 
@@ -847,7 +836,6 @@ async def run_nba_coupon_job(app: Application, all_matches: list):
         coupon_type="NBA"
     )
     
-    global last_run
     if text:
         await send_to_channel(app, text)
         last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
@@ -858,11 +846,11 @@ async def run_nba_coupon_job(app: Application, all_matches: list):
 
 # ---------------- LIVE COUPON JOB ----------------
 async def run_live_coupon_job(app: Application, all_matches: list):
+    global last_run # Global deklarasyonu fonksiyonun başında
     log.info(f"Canlı kupon döngüsü başlatılıyor. (Min %{LIVE_MIN_CONFIDENCE} güven aranıyor)")
     
     live_matches = [m for m in all_matches if m.get("live")]
     if not live_matches:
-        global last_run
         log.info("Canlı kupon için uygun maç bulunamadı.")
         last_run["LIVE"] = datetime.now(timezone.utc)
         return
@@ -879,7 +867,6 @@ async def run_live_coupon_job(app: Application, all_matches: list):
                 match_preds.append((m, pred, best["confidence"]))
     
     if not match_preds:
-        global last_run
         log.info(f"Canlı maçlar arasında min %{LIVE_MIN_CONFIDENCE} güven eşiğini geçen bulunamadı.")
         last_run["LIVE"] = datetime.now(timezone.utc)
         return
@@ -904,7 +891,6 @@ async def run_live_coupon_job(app: Application, all_matches: list):
             asyncio.create_task(post_coupon_after_delay(app, text, delay))
             log.info(f"Canlı maç '{m.get('home')}' için {delay} dakika gecikmeli gönderim planlandı.")
         
-    global last_run
     last_run["LIVE"] = datetime.now(timezone.utc)
 
 
@@ -996,7 +982,7 @@ async def initial_runs_scheduler(app: Application, all_matches):
 
 
 async def job_runner(app: Application):
-    # Düzeltme: Tüm global deklarasyonlar fonksiyonun en başına taşındı (Hata bu satırda oluşuyordu).
+    # DÜZELTME: Tüm global deklarasyonlar fonksiyonun EN BAŞINA taşındı.
     global last_run 
     global ai_rate_limit
     
@@ -1101,7 +1087,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.9.1 (Global Hata Düzeltme) başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.9.2 (Global Hata Düzeltme) başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
