@@ -1,14 +1,4 @@
-# ================== Telegram Bot ==================
-python-telegram-bot[job-queue]==21.6
-
-# ================== HTTP & Async ==================
-aiohttp==3.9.1
-nest_asyncio==1.5.6
-
-# ================== Web Framework ==================
-fastapi==0.109.2
-uvicorn[standard]==0.23.2
-
-# ================== Diğer (opsiyonel) ==================
-python-dotenv==1.0.1
-openai>=1.40.0
+aiohttp
+python-telegram-bot==20.8
+requests
+sportradar  # Opsiyonel wrapper, ama requests yeterli
