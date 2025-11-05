@@ -1,4 +1,4 @@
-# main.py — v62.9.2 (Global Deklarasyon Hatası Kesin Giderildi)
+# main.py — v62.9.3 (Maç Filtreleme ve Güçlendirilmiş API Çağrıları)
 
 import os
 import asyncio
@@ -18,7 +18,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.9.2") 
+log = logging.getLogger("v62.9.3") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -64,6 +64,16 @@ NBA_MIN_CONFIDENCE = 85
 NBA_MIN_ODDS = 1.20           
 NO_ODDS_MIN_CONFIDENCE = 80   
 
+# Dinamik Maç Başlama Saatleri (Saat cinsinden fark)
+MATCH_TIME_HORIZON = {
+    "VIP": {"min": 0.5, "max": 24},   # 30 dakika - 24 saat arası
+    "DAILY": {"min": 6, "max": 48},   # 6 saat - 48 saat arası
+    "NBA": {"min": 0.5, "max": 24},   # 30 dakika - 24 saat arası (Tipik NBA programı)
+    "INSTANT": {"min": 0.5, "max": 24}, # 30 dakika - 24 saat arası
+    "LIVE": {"min": -1, "max": 0.5},   # Başlamış maçlar (-1 saatten 30 dakikaya kadar)
+    "TEST": {"min": 0.5, "max": 72},
+}
+
 # OpenAI Limit
 AI_MAX_CALLS_PER_MINUTE = 5 
 
@@ -105,15 +115,20 @@ def to_local_str(iso_ts: str):
         return dt.astimezone(TR_TZ).strftime("%d.%m %H:%M") 
     except Exception: return str(iso_ts)
 
-def within_hours(iso_ts: str, hours: int):
+def within_time_range(iso_ts: str, min_hours: float, max_hours: float):
+    """Belirtilen saat aralığında (min_hours ve max_hours) olup olmadığını kontrol eder."""
     if not iso_ts: return False
     try:
         dt = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
         if dt.tzinfo is None or dt.tzinfo.utcoffset(dt) is None:
              dt = dt.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
-        delta = (dt - now).total_seconds()
-        return 0 <= delta <= hours * 3600
+        delta_seconds = (dt - now).total_seconds()
+        
+        min_seconds = min_hours * 3600
+        max_seconds = max_hours * 3600
+        
+        return min_seconds <= delta_seconds <= max_seconds
     except Exception: return False
 
 def safe_get(d, *keys):
@@ -258,17 +273,18 @@ async def fetch_football_data(session):
                 start = it.get("utcDate") 
                 status = it.get("status")
                 is_live = status in ("IN_PLAY", "PAUSED")
-                if status in ("FINISHED", "SUSPENDED", "POSTPONED") or (status != "SCHEDULED" and not is_live) or (not is_live and not within_hours(start, 24)): continue 
+                if status in ("FINISHED", "SUSPENDED", "POSTPONED") or (status != "SCHEDULED" and not is_live) or (not is_live and not within_time_range(start, 0, 24)): continue 
                 res.append({"id": it.get('id'),"home": safe_get(it, "homeTeam", "name"),"away": safe_get(it, "awayTeam", "name"),"start": start,"source": name,"live": is_live,"odds": {},"sport": safe_get(it, "competition", "name") or "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_api_football(session):
     name = "API-Football"
     res = []
     url = "https://v3.football.api-sports.io/fixtures"
-    end_time = datetime.now(timezone.utc) + timedelta(hours=24)
+    end_time = datetime.now(timezone.utc) + timedelta(hours=48) # 48 saate çıkarıldı
     params = {"from": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "to": end_time.strftime("%Y-%m-%d")}
     headers = {"x-apisports-key": API_FOOTBALL_KEY}
     if not API_FOOTBALL_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
@@ -284,10 +300,11 @@ async def fetch_api_football(session):
                 status_short = (safe_get(fix, "status", "short") or "").lower()
                 start = fix.get("date")
                 is_live = status_short not in ("ns", "tbd", "ft", "ht") and status_short not in ("ns", "tbd")
-                if not is_live and not within_hours(start, 24): continue
+                if not is_live and not within_time_range(start, 0, 48): continue
                 res.append({"id": safe_get(fix,'id'),"home": safe_get(it,"teams","home","name") or "Home","away": safe_get(it,"teams","away","name") or "Away","start": start,"source": name,"live": is_live,"odds": safe_get(it, "odds") or {},"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_the_odds(session):
@@ -305,10 +322,11 @@ async def fetch_the_odds(session):
                 for it in data:
                     start = it.get("commence_time")
                     sport_key = it.get("sport_key", "Soccer")
-                    if not start or not within_hours(start, 48): continue
+                    if not start or not within_time_range(start, 0, 48): continue # 48 saat sınırı
                     res.append({"id": it.get('id'),"home": it.get("home_team","Home"),"away": it.get("away_team","Away"),"start": start,"source": name,"live": False,"odds": it.get("bookmakers", []),"sport": sport_key})
             log.info(f"{name} raw:{len(data) if isinstance(data, list) else 0} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_balldontlie(session):
@@ -329,10 +347,11 @@ async def fetch_balldontlie(session):
                 is_live = start_status not in ("Pre Game", "Final") 
                 if start_status == "Final": continue
                 full_start = f"{match_date.split('T')[0]}T18:00:00Z" 
-                if not is_live and not within_hours(full_start, 48): continue
+                if not is_live and not within_time_range(full_start, 0, 48): continue # 48 saat sınırı
                 res.append({"id": it.get('id'),"home": safe_get(it,"home_team","full_name") or "Home","away": safe_get(it,"visitor_team","full_name") or "Away","start": full_start,"source": name,"live": is_live,"odds": {},"sport": "basketball_nba"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_openligadb(session):
@@ -347,17 +366,18 @@ async def fetch_openligadb(session):
             for it in items:
                 start = it.get("matchDateTimeUTC")
                 is_live = not it.get("matchIsFinished") and it.get("matchResults")
-                if it.get("matchIsFinished") or (not is_live and not within_hours(start, 24)): continue
+                if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 24)): continue
                 res.append({"id": it.get('matchID'),"home": safe_get(it,"team1","teamName"),"away": safe_get(it,"team2","teamName"),"start": start,"source": name,"live": is_live,"odds": {},"sport": "Football (Bundesliga)"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_sportsmonks(session):
     name = "SportsMonks"
     res = []
     url = "https://api.sportmonks.com/v3/football/fixtures"
-    params = {"api_token": SPORTSMONKS_KEY, "include": "odds", "filter[starts_between]": f"{NOW_UTC.strftime('%Y-%m-%d')},{ (NOW_UTC + timedelta(days=1)).strftime('%Y-%m-%d')}"}
+    params = {"api_token": SPORTSMONKS_KEY, "include": "odds", "filter[starts_between]": f"{NOW_UTC.strftime('%Y-%m-%d')},{ (NOW_UTC + timedelta(days=2)).strftime('%Y-%m-%d')}"} # 48 saate çıkarıldı
     if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
@@ -367,10 +387,11 @@ async def fetch_sportsmonks(session):
             items = data.get("data") or []
             for it in items:
                 start = it.get("starting_at")
-                if not within_hours(start, 24): continue
+                if not within_time_range(start, 0, 48): continue
                 res.append({"id": it.get('id'),"home": it.get("home_team_name"),"away": it.get("away_team_name"),"start": start,"source": name,"live": False,"odds": it.get("odds", {}),"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_footystats(session):
@@ -387,10 +408,11 @@ async def fetch_footystats(session):
             items = data.get("data") or []
             for it in items:
                 start = it.get("match_start_iso") or it.get("start_date")
-                if it.get("status") != "upcoming" or not within_hours(start, 24): continue
+                if it.get("status") != "upcoming" or not within_time_range(start, 0, 48): continue # 48 saate çıkarıldı
                 res.append({"id": it.get('id'),"home": it.get("home_name"),"away": it.get("away_name"),"start": start,"source": name,"live": False,"odds": {},"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_isports(session):
@@ -409,11 +431,12 @@ async def fetch_isports(session):
                 start = it.get("matchTime") 
                 match_status = it.get("matchStatus")
                 is_live = match_status != 0 and match_status != -1
-                if match_status == -1 or (not is_live and not within_hours(start, 24)): continue 
+                if match_status == -1 or (not is_live and not within_time_range(start, 0, 24)): continue 
                 res.append({"id": it.get('matchId'),"home": it.get("homeTeamName"),"away": it.get("awayTeamName"),"start": start,"source": name,"live": is_live,"odds": it.get("odds", {}),"sport": it.get("sportType", "Bilinmeyen")})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except ssl.SSLCertVerificationError as e: log.warning(f"{name} hata: SSL sertifika hatası (Geçici olarak atlanıyor)."); return res
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_ergast(session):
@@ -431,10 +454,11 @@ async def fetch_ergast(session):
                 date = race.get("Date")
                 time = race.get("Time", "00:00:00Z")
                 start = f"{date}T{time}"
-                if not within_hours(start, 24): continue
+                if not within_time_range(start, 0, 24): continue
                 res.append({"id": race.get('raceId'),"home": race_name,"away": race.get("Circuit", {}).get("circuitName"),"start": start,"source": name,"live": False,"odds": {},"sport": "Formula 1"})
             log.info(f"{name} raw:{len(race_table)} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 async def fetch_nhl(session):
@@ -454,12 +478,13 @@ async def fetch_nhl(session):
                     start_time = game.get("gameDate")
                     status_detail = safe_get(game, "status", "detailedState")
                     is_live = status_detail not in ("Scheduled", "Pre-Game", "Final")
-                    if status_detail == "Final" or (not is_live and not within_hours(start_time, 24)): continue
+                    if status_detail == "Final" or (not is_live and not within_time_range(start_time, 0, 24)): continue
                     home_team = safe_get(game, "teams", "home", "team", "name")
                     away_team = safe_get(game, "teams", "away", "team", "name")
                     res.append({"id": game_pk,"home": home_team,"away": away_team,"start": start_time,"source": name,"live": is_live,"odds": {},"sport": "Buz Hokeyi (NHL)"})
             log.info(f"{name} filtered:{len(res)}")
-    except Exception as e: log.warning(f"{name} hata: {e}"); return res
+    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
+    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
 
@@ -477,21 +502,27 @@ async def fetch_all_matches():
             fetch_ergast(session),
             fetch_nhl(session),
         ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Güçlendirilmiş toplu çağrı
+        results = await asyncio.gather(*tasks, return_exceptions=True) 
     
     all_matches = []
     for r in results:
-        if isinstance(r, Exception): log.warning(f"fetch task exception: {r}"); continue
+        # İstisna yakalama eklendi. API'den hata gelirse, görevi atla.
+        if isinstance(r, Exception): 
+            log.warning(f"fetch task exception: {r}"); continue
         all_matches.extend(r or [])
         
     normalized = []
     odds_map = {}
     
+    # Odds Map oluşturma (TheOdds)
     for m in all_matches:
         if m.get('source') == "TheOdds":
             key = (m.get('home'), m.get('away'), m.get('start')[:10], m.get('sport'))
             odds_map[key] = m.get('odds', {})
             
+    # Maçları normalize etme ve Odds birleştirme
     for m in all_matches:
         start = m.get("start") or m.get("date") or ""
         if isinstance(start, (int, float)):
@@ -522,6 +553,7 @@ async def fetch_all_matches():
             "sport": normalized_sport
         })
         
+    # Tekrarlanan maçları ayıklama
     seen = set()
     final = []
     for m in normalized:
@@ -545,8 +577,9 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
         ai_rate_limit["calls"] = 0
         ai_rate_limit["reset"] = now + timedelta(seconds=60) 
     
+    # Hızlı kontrol
     if ai_rate_limit["calls"] >= AI_MAX_CALLS_PER_MINUTE: 
-        log.warning(f"OpenAI lokal kısıtlama ({AI_MAX_CALLS_PER_MINUTE} RPM limitine ulaşıldı). Fallback.")
+        log.warning(f"OpenAI lokal kısıtlama ({AI_MAX_CALLS_PER_MINUTE} RPM limitine ulaşıldı). Atlanıyor.")
         return None 
         
     ai_rate_limit["calls"] += 1 
@@ -660,29 +693,49 @@ def format_match_block(m, pred, coupon_type):
     
     if target_odd:
         display_suggestion = suggestion.split(':')[0].strip() if ':' in suggestion and not is_nba_coupon else suggestion
-        if "MS" in display_suggestion and coupon_type != "INSTANT":
+        if "MS" in display_suggestion and coupon_type not in ["INSTANT", "LIVE"]:
              display_suggestion = display_suggestion.replace("MS", "").strip()
         
-        odd_line = f"💰 Oran: {display_suggestion}: <b>{target_odd:.2f}</b>\n"
+        odd_line = f"💰 Oran: {display_suggestion}: <b>{target_odd:.2f}</b>"
     
     block = (
-        f"🏆 <b>{m.get('home')} vs {m.get('away')}</b>\n"
-        f"📅 {start_local} | {sport_name}\n" 
-        f"📈 <b>{suggestion}</b> (%{confidence})\n" 
-        f"  - <i>{explanation}</i>\n"
+        f"🏅 <b>{m.get('home')} vs {m.get('away')}</b>\n"
+        f"  - 📅 {start_local} | {sport_name}\n" 
+        f"  - 📈 Seçim: <b>{suggestion}</b> (%{confidence})\n" 
+        f"  - 💡 Analiz: <i>{explanation}</i>\n"
     )
     
-    block += odd_line
+    if odd_line:
+         block += f"  - {odd_line}\n"
     
     return block.strip()
 
-async def build_coupon_text(matches, title, max_matches, coupon_type: str):
+async def build_coupon_text(matches: list, title: str, max_matches: int, coupon_type: str):
     global posted_matches
     
     lines = []
     count = 0
     now = datetime.now(timezone.utc)
     
+    # Maçları kupon tipine göre filtrele
+    time_bounds = MATCH_TIME_HORIZON.get(coupon_type, {"min": 0, "max": 72})
+    
+    filtered_matches = []
+    
+    for m in matches:
+        if m.get("live") and coupon_type != "LIVE": continue
+        if not m.get("live") and coupon_type == "LIVE": continue
+        
+        # Dinamik zaman aralığı kontrolü
+        if within_time_range(m.get("start"), time_bounds["min"], time_bounds["max"]):
+            filtered_matches.append(m)
+        else:
+             log.debug(f"Maç zaman aralığına uymadı ({coupon_type}): {m.get('home')} - {m.get('start')}")
+             
+    if coupon_type == "NBA":
+        filtered_matches = [m for m in filtered_matches if m.get("sport") == "🏀 NBA"]
+        
+    # Güven ve Oran limitlerini belirle
     is_daily_coupon = coupon_type == "DAILY"
     is_nba_coupon = coupon_type == "NBA"
     is_instant_coupon = coupon_type == "INSTANT"
@@ -706,7 +759,15 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
     
     match_preds = []
     
-    for m in matches:
+    for m in filtered_matches: 
+        
+        # Cooldown kontrolü (Canlı hariç)
+        match_id = m.get("id")
+        if coupon_type not in ["LIVE", "TEST"]: 
+             if match_id in posted_matches and (now - posted_matches[match_id]).total_seconds() < INSTANT_ANALYSIS_COOLDOWN_MINUTES * 60:
+                log.info(f"Maç atlandı (zaten yayınlandı ve cooldown: {INSTANT_ANALYSIS_COOLDOWN_MINUTES}dk): {m.get('home')} vs {m.get('away')}")
+                continue
+                
         pred = await predict_for_match(m, coupon_type)
         
         if pred and pred.get("predictions"):
@@ -741,11 +802,6 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
             
         match_id = m.get("id")
         
-        if coupon_type != "LIVE": 
-             if match_id in posted_matches and (now - posted_matches[match_id]).total_seconds() < INSTANT_ANALYSIS_COOLDOWN_MINUTES * 60:
-                log.info(f"Maç atlandı (zaten yayınlandı ve cooldown: {INSTANT_ANALYSIS_COOLDOWN_MINUTES}dk): {m.get('home')} vs {m.get('away')}")
-                continue
-        
         lines.append(format_match_block(m, pred, coupon_type))
             
         if "TEST" not in title and coupon_type != "LIVE":
@@ -759,13 +815,14 @@ async def build_coupon_text(matches, title, max_matches, coupon_type: str):
 
     if not lines: return None
         
+    # Kupon Başlığı Formatı
     header = (
-        f"━━━━━━━━━━━━━━━\n"
-        f"   {title}\n"
-        f"━━━━━━━━━━━━━━━\n"
+        f"➖➖➖ 💎 AI Betting Bot 💎 ➖➖➖\n"
+        f"   🏆 {title} 🏆\n"
+        f"➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
     )
     footer = (
-        f"\n━━━━━━━━━━━━━━━\n"
+        f"\n➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
         f"⚠️ <i>Bahis risklidir. Tahminler yalnızca yapay zeka analizi amaçlıdır. Lütfen bilinçli oynayın.</i>\n"
     )
     return header + "\n\n" + "\n\n".join(lines) + footer
@@ -781,29 +838,12 @@ async def post_coupon_after_delay(app, text, delay_minutes):
 
 # ---------------- INSTANT ANALYSIS JOB (YENİ) ----------------
 async def run_instant_analysis_job(app: Application, all_matches: list):
-    global last_run # Global deklarasyonu fonksiyonun başında
+    global last_run
     log.info(f"Anlık Analiz döngüsü başlatılıyor. (Min %{INSTANT_ANALYSIS_MIN_CONFIDENCE} güven aranıyor)")
     
-    upcoming_matches = [m for m in all_matches if not m.get("live") and within_hours(m.get("start"), 168)]
-    
-    target_matches = []
-    now = datetime.now(timezone.utc)
-    for m in upcoming_matches:
-        try:
-            start_dt = datetime.fromisoformat(m.get("start").replace("Z", "+00:00")).replace(tzinfo=timezone.utc)
-            time_to_start = (start_dt - now).total_seconds()
-            if 1800 <= time_to_start <= 24 * 3600: # 30 dakika ile 24 saat arasında
-                 target_matches.append(m)
-        except:
-            continue
-            
-    if not target_matches:
-        log.info("Anlık Analiz için uygun maç bulunamadı (30dk-24saat aralığında).")
-        last_run["INSTANT"] = datetime.now(timezone.utc)
-        return
-
+    # Dinamik filtreleme artık build_coupon_text içinde yapılıyor
     text = await build_coupon_text(
-        target_matches, 
+        all_matches, 
         "⚡ ANLIK AI ANALİZ (Continuity Bet)", 
         max_matches=1,
         coupon_type="INSTANT"
@@ -820,17 +860,12 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
 
 # ---------------- NBA COUPON JOB ----------------
 async def run_nba_coupon_job(app: Application, all_matches: list):
-    global last_run # Global deklarasyonu fonksiyonun başında
+    global last_run
     log.info(f"NBA kupon döngüsü başlatılıyor. (Min %{NBA_MIN_CONFIDENCE} güven, Min {NBA_MIN_ODDS} oran aranıyor)")
     
-    nba_matches = [m for m in all_matches if m.get("sport") == "🏀 NBA"]
-    if not nba_matches:
-        log.info("NBA kuponu için uygun maç bulunamadı.")
-        last_run["NBA"] = datetime.now(timezone.utc)
-        return
-
+    # Dinamik filtreleme artık build_coupon_text içinde yapılıyor
     text = await build_coupon_text(
-        nba_matches, 
+        all_matches, 
         "🏀 NBA GOLDEN BET AI SEÇİMİ", 
         max_matches=NBA_MAX_MATCHES,
         coupon_type="NBA"
@@ -846,7 +881,7 @@ async def run_nba_coupon_job(app: Application, all_matches: list):
 
 # ---------------- LIVE COUPON JOB ----------------
 async def run_live_coupon_job(app: Application, all_matches: list):
-    global last_run # Global deklarasyonu fonksiyonun başında
+    global last_run
     log.info(f"Canlı kupon döngüsü başlatılıyor. (Min %{LIVE_MIN_CONFIDENCE} güven aranıyor)")
     
     live_matches = [m for m in all_matches if m.get("live")]
@@ -857,6 +892,7 @@ async def run_live_coupon_job(app: Application, all_matches: list):
 
     match_preds = []
     
+    # Canlı maçlar için filtreleme ve tahmin yapma (hızlı olması için)
     for m in live_matches:
         pred = await predict_for_match(m, coupon_type="LIVE") 
         
@@ -880,14 +916,19 @@ async def run_live_coupon_job(app: Application, all_matches: list):
         delay = i * LIVE_STAGGER_INTERVAL_MINUTES
         title = f"🟢 CANLI AI SEÇİMİ (Güven: %{confidence})"
         
-        text = await build_coupon_text(
-            [m], 
-            title, 
-            max_matches=1,
-            coupon_type="LIVE"
-        )
+        # Sadece seçilen maçı tek bir kupon metnine dönüştürmek için format_match_block kullanıldı
+        match_block = format_match_block(m, pred, coupon_type="LIVE")
+        
+        if match_block:
+            text = (
+                f"➖➖➖ 💎 AI Betting Bot 💎 ➖➖➖\n"
+                f"   🏆 {title} 🏆\n"
+                f"➖➖➖➖➖➖➖➖➖➖➖➖➖\n\n"
+                f"{match_block}\n\n"
+                f"➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+                f"⚠️ <i>Bahis risklidir. Lütfen bilinçli oynayın.</i>\n"
+            )
 
-        if text:
             asyncio.create_task(post_coupon_after_delay(app, text, delay))
             log.info(f"Canlı maç '{m.get('home')}' için {delay} dakika gecikmeli gönderim planlandı.")
         
@@ -905,7 +946,7 @@ async def send_to_channel(app, text):
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log.info("Test komutu çalıştırıldı.")
     
-    global ai_rate_limit # Düzeltme: Global deklarasyonu en başta
+    global ai_rate_limit
     ai_rate_limit["calls"] = 0
     ai_rate_limit["reset"] = datetime.now(timezone.utc) + timedelta(seconds=60)
     
@@ -913,7 +954,7 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     matches = await fetch_all_matches() 
     if not matches:
-        await update.message.reply_text("Maç bulunamadı (48 saat içinde başlayacak).")
+        await update.message.reply_text("Maç bulunamadı (Filtreler genişletilmelidir).")
         return
         
     text = await build_coupon_text(
@@ -932,20 +973,25 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def initial_runs_scheduler(app: Application, all_matches):
     """Bot başlatıldıktan sonra istenen ilk kuponları belirli sürelerde gönderir."""
     
-    global last_run # Düzeltme: Global deklarasyonu en başta
+    global last_run
     
-    # --- 1. INSTANT ANALYSIS COUPON (Anında Çalışsın) ---
+    # --- 1. LIVE COUPON (Anında) ---
     await asyncio.sleep(5)
-    log.info("İlk Anlık Analiz Kuponu hemen hazırlanıyor.")
+    log.info("İlk Canlı Kupon çalıştırması hemen başlatılıyor.")
+    await run_live_coupon_job(app, all_matches)
+    
+    # --- 2. INSTANT ANALYSIS COUPON (Anında Çalışsın) ---
+    await asyncio.sleep(60)
+    log.info("İlk Anlık Analiz Kuponu hazırlanıyor.")
     await run_instant_analysis_job(app, all_matches)
 
-    # --- 2. NBA COUPON (NBA: 1 Dakika Sonra) ---
-    await asyncio.sleep(55)
+    # --- 3. NBA COUPON (NBA: 2 Dakika Sonra) ---
+    await asyncio.sleep(60)
     log.info("İlk NBA Kuponu hazırlanıyor.")
     await run_nba_coupon_job(app, all_matches)
 
-    # --- 3. DAILY COUPON (Günlük: 4 Dakika Sonra) ---
-    await asyncio.sleep(180) 
+    # --- 4. DAILY COUPON (Günlük: 4 Dakika Sonra) ---
+    await asyncio.sleep(120) 
     log.info("İlk Günlük Kupon hazırlanıyor.")
     
     text_daily = await build_coupon_text(
@@ -959,8 +1005,8 @@ async def initial_runs_scheduler(app: Application, all_matches):
           last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     last_run["DAILY"] = datetime.now(timezone.utc)
     
-    # --- 4. VIP COUPON (VIP: 11 Dakika Sonra) ---
-    await asyncio.sleep(420) 
+    # --- 5. VIP COUPON (VIP: 11 Dakika Sonra) ---
+    await asyncio.sleep(240) 
     log.info("İlk VIP Kupon hazırlanıyor.")
 
     text_vip = await build_coupon_text(
@@ -974,15 +1020,11 @@ async def initial_runs_scheduler(app: Application, all_matches):
          last_run["LAST_COUPON_POSTED"] = datetime.now(timezone.utc)
     last_run["VIP"] = datetime.now(timezone.utc)
     
-    # --- 5. LIVE COUPON (Anında) ---
-    log.info("İlk Canlı Kupon çalıştırması hemen başlatılıyor.")
-    await run_live_coupon_job(app, all_matches)
-
     log.info("İlk çalıştırma tamamlandı. Periyodik döngüye geçiliyor.")
 
 
 async def job_runner(app: Application):
-    # DÜZELTME: Tüm global deklarasyonlar fonksiyonun EN BAŞINA taşındı.
+    # Global değişken deklarasyonları fonksiyonun en başında
     global last_run 
     global ai_rate_limit
     
@@ -1087,7 +1129,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.9.2 (Global Hata Düzeltme) başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.9.3 (Güçlendirilmiş API) başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
