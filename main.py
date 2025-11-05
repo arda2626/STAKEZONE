@@ -1,5 +1,3 @@
-# main.py — v62.9.4 (Düzeltilmiş API Çağrıları)
-
 import os
 import asyncio
 import logging
@@ -30,7 +28,7 @@ API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2"
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771" 
 SPORTSMONKS_KEY = "AirVTC8HLItQs55iaPnxp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ"
 ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
-FOOTYSTATS_KEY = "test85g57" 
+FOOTYSTATS_KEY = "example"  # Düzeltilmiş: Test anahtarı "example" olarak değiştirildi
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
 FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7" 
 
@@ -357,18 +355,28 @@ async def fetch_balldontlie(session):
 async def fetch_openligadb(session):
     name = "OpenLigaDB"
     res = []
-    url = "https://api.openligadb.de/getmatchdata/bl1/2025/1"  # Domain düzeltildi: www yerine api
+    current_url = "https://api.openligadb.de/getcurrentgroup/bl1"
     try:
-        async with session.get(url, timeout=12) as r:
-            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+        async with session.get(current_url, timeout=12) as r:
+            if r.status != 200: 
+                log.warning(f"{name} Current group HTTP HATA: {r.status}")
+                return res
             data = await r.json()
-            items = data if isinstance(data, list) else []
-            for it in items:
-                start = it.get("matchDateTimeUTC")
-                is_live = not it.get("matchIsFinished") and it.get("matchResults")
-                if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 24)): continue
-                res.append({"id": it.get('matchID'),"home": safe_get(it,"team1","teamName"),"away": safe_get(it,"team2","teamName"),"start": start,"source": name,"live": is_live,"odds": {},"sport": "Football (Bundesliga)"})
-            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
+            group_order_id = data.get("groupOrderID")
+            if not group_order_id:
+                log.warning(f"{name} Current group not found.")
+                return res
+            url = f"https://api.openligadb.de/getmatchdata/bl1/2025/{group_order_id}"
+            async with session.get(url, timeout=12) as r:
+                if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}."); return res
+                data = await r.json()
+                items = data if isinstance(data, list) else []
+                for it in items:
+                    start = it.get("matchDateTimeUTC")
+                    is_live = not it.get("matchIsFinished") and it.get("matchResults")
+                    if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 24)): continue
+                    res.append({"id": it.get('matchID'),"home": safe_get(it,"team1","teamName"),"away": safe_get(it,"team2","teamName"),"start": start,"source": name,"live": is_live,"odds": {},"sport": "Football (Bundesliga)"})
+                log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
     except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
@@ -399,8 +407,8 @@ async def fetch_sportsmonks(session):
 async def fetch_footystats(session):
     name = "FootyStats"
     res = []
-    url = "https://api.footystats.org/upcoming-matches"  # Düzeltilmiş endpoint: league-matches yerine upcoming-matches (genel için varsayım, dokümantasyona göre league-matches için league_id gerekiyor, genel için bu olabilir)
-    params = {"key": FOOTYSTATS_KEY}
+    url = "https://api.football-data-api.com/league-matches"  # Düzeltilmiş endpoint: league-matches (genel upcoming için league_id ile)
+    params = {"key": FOOTYSTATS_KEY, "league_id": "1625"}  # EPL için test, Bundesliga ID'si için değiştirin (örneğin 2002 veya bulun)
     if not FOOTYSTATS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
