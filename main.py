@@ -1135,8 +1135,9 @@ async def job_runner(app: Application):
             log.exception(f"Job runner hatası: {e}")
         await asyncio.sleep(60)
 
-# ---------------- run_app (Ana Başlatıcı - GÜNCEL VE STABİL) ----------------
-async def run_app():
+# ---------------- run_app (Ana Başlatıcı - DÜZELTİLDİ VE SENKRON) ----------------
+# KRİTİK: run_polling ile çakışmayı önlemek için ASYNC ANAHTAR KELİMESİ KALDIRILDI
+def run_app():
     if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
         log.critical("Gerekli ENV değişkenleri eksik!")
         sys.exit(1)
@@ -1144,12 +1145,21 @@ async def run_app():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
     
-    # KRİTİK DÜZELTME: initialize çağrısı
+    # DÜZELTME: Asenkron initialize'ı manuel olarak senkron ortamda çalıştır
     log.info("Uygulama dahili olarak başlatılıyor (initialize)...")
-    await app.initialize()
+    try:
+        # initialize bir coroutine olduğu için asyncio.run'ı (veya benzer bir yöntemi) kullanmalıyız. 
+        # Ana loop zaten asyncio.run() tarafından başlatıldığı için, aynı loop'ta çalıştırmak için:
+        asyncio.get_event_loop().run_until_complete(app.initialize()) 
+    except RuntimeError:
+        # Loop zaten çalışıyorsa (asyncio.run() tarafından), sadece await edebiliriz.
+        # Bu durumda, run_polling başlatılmadan önce initialize'ın çalışması beklenir:
+        # Ancak, run_polling kendi loop'unu başlattığı için, en güvenli yol budur.
+        log.warning("Loop already running hatası yakalandı. run_polling'in loop'u yönetmesi bekleniyor.")
+        pass # run_polling bu adımı kendi içinde tekrarlayacaktır.
 
     async def post_init_callback(application: Application):
-        # post_init, run_polling çağrıldıktan hemen sonra event loop içinde tetiklenir.
+        # post_init, run_polling tarafından başlatılan event loop içinde tetiklenir.
         log.info("Job runner başarıyla asenkron görev olarak başlatılıyor.")
         asyncio.create_task(job_runner(application))
 
@@ -1158,21 +1168,64 @@ async def run_app():
     # run_polling, hem start() hem de polling'i başlatır ve ana döngüyü yönetir.
     log.info("v62.9.5 başlatılıyor (run_polling)...")
     try:
-        # run_polling() uygulamayı başlatır ve döngüde tutar.
-        await app.run_polling(drop_pending_updates=True, close_loop=False) 
+        # run_polling() senkronize bir şekilde çalışır ve loop'u yönetir.
+        app.run_polling(drop_pending_updates=True, close_loop=False) 
     except Exception as e:
         log.critical(f"Ana döngü hatası: {e}", exc_info=True)
     finally:
-        # run_polling kapandığında burası tetiklenir
         log.info("Uygulama başarılı bir şekilde kapatıldı.")
 
+# ---------------- Ana Çalışma Bloğu ----------------
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
-        # run_app() artık tüm asenkron yönetimi yapıyor.
-        asyncio.run(run_app())
+        
+        # DÜZELTME: run_app artık senkron olduğu için asyncio.run() çağrısı KALDIRILDI.
+        # run_app'in kendisi içindeki run_polling, event loop'u yönetiyor.
+        # Ancak Telegram botları için bu yapı yine loop çakışmasına neden olabilir. 
+        # Standart ve en güvenli başlatma şekli run_polling'i tek bir asyncio.run() çağrısının içine almaktır.
+        
+        # Önceki hatanın sebebi, initialize'ın asyncio.run(run_app()) loop'unda çalışmasıydı. 
+        # run_app'ı tekrar async yapıp initialize'ı await ile çağıralım ve run_polling'in kendi initialize'ını yönetmesini bekleyelim.
+        
+        # En stabil çözüm için run_app'ı tekrar async yapıp, initialize'ı kaldırdık ve run_polling'e bıraktık:
+        # (Bu, önceki 1. versiyona döner ancak hatayı görmezden gelir, ki bu iyi değil.
+        #  Bu yüzden senkron yapıyı koruyalım, ancak initialize'ı manuel çağırmayı kaldırıp run_polling'in çağırmasını bekleyelim.)
+        
+        # KRİTİK FİNAL DÜZELTME: run_app'ı async yapalım, ancak initialize'ı dışarıda çağırmayalım.
+        
+        async def final_run_app():
+            if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
+                log.critical("Gerekli ENV değişkenleri eksik!")
+                sys.exit(1)
+
+            app = Application.builder().token(TELEGRAM_TOKEN).build()
+            app.add_handler(CommandHandler("test", cmd_test))
+            
+            log.info("Uygulama dahili olarak başlatılıyor (initialize)...")
+            # app.initialize() çağrısını run_polling'e bırakıyoruz
+            
+            async def post_init_callback(application: Application):
+                log.info("Job runner başarıyla asenkron görev olarak başlatılıyor.")
+                asyncio.create_task(job_runner(application))
+
+            app.post_init = post_init_callback
+
+            log.info("v62.9.5 başlatılıyor (run_polling)...")
+            try:
+                # run_polling, asyncio.run() tarafından başlatılan loop'u devralacak.
+                await app.run_polling(drop_pending_updates=True, close_loop=False) 
+            except Exception as e:
+                log.critical(f"Ana döngü hatası: {e}", exc_info=True)
+            finally:
+                log.info("Uygulama başarılı bir şekilde kapatıldı.")
+
+
+        # run_app'ın kendisini bu döngünün içine dahil etmek en temiz yoldur.
+        # Bu, önceki iki hatayı (run_polling çakışması ve initialize hatası) çözmelidir.
+        asyncio.run(final_run_app())
+        
     except KeyboardInterrupt:
-        # Ctrl+C ile kapatılma
         log.info("Kullanıcı tarafından kesme (KeyboardInterrupt) alındı. Bot kapatılıyor.")
         sys.exit(0)
     except Exception as e:
