@@ -1,4 +1,4 @@
-# bot.py - v68.0 - Sambanova LLM Anahtarı Entegre
+# bot.py - v69.0 - Sambanova LLM (OpenAI Uyumlu)
 import os
 import asyncio
 import logging
@@ -12,13 +12,13 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import Conflict
 
 # ***************************************************************
-# 🔴 UYARI: Sambanova'dan aldığınız kesin URL adresi bu değilse,
-# lütfen SAMBANOVA_URL değişkenini güncelleyin.
+# 🔴 UYARI: SAMBANOVA_URL değişkenini, panelinizden aldığınız 
+# kesin adrese ayarlamanız GEREKMEKTEDİR.
 # ***************************************************************
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v68.0")
+log = logging.getLogger("STAKEZONE-AI v69.0")
 
 # Telegram anahtarı ENV'den çekilir veya buradaki yedek kullanılır
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNyLYk3KahAL2k9ABOkdL7eFIb7s")
@@ -26,8 +26,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1001234567890")
 
 # --- AI Anahtarları (Sambanova) ---
 SAMBANOVA_KEY = os.getenv("SAMBANOVA_KEY", "2d9ff014-9759-4166-bed7-bfaf5f411ced") # ENTEGRE EDİLDİ
-SAMBANOVA_URL = os.getenv("SAMBANOVA_URL", "https://api.sambanova.ai/v1/chat/completions") # Tahmini Chat Endpoint URL'si
-MODEL = "sambanova-llm" 
+SAMBANOVA_URL = os.getenv("SAMBANOVA_URL", "https://api.sambanova.ai/v1/chat/completions") # Lütfen Sambanova panelinizden KONTROL EDİN
+MODEL = "sambanova-llm" # Sambanova Model Adı (Gerekiyorsa güncelleyin)
 # ------------------------------------------------------------------------
 
 # --- Spor API Anahtarları (Korundu) ---
@@ -42,7 +42,7 @@ SPORTMONKS_API_KEY = os.getenv("SPORTMONKS_API_KEY", "cbcas9S9m69LZOcIUR591VpWVj
 TR_TZ = timezone(timedelta(hours=3))
 SYSTEM_PROMPT = (
     "Sen, STAKEZONE-AI adlı yapay zeka tarafından yönetilen, üst düzey bir kumarbaz, bahis tahmincisi, "
-    "spor yorumcusu ve yapay zeka geliştiricisisin. Birincil hedefin, sana sunulan her futbol maçı için "
+    "spor yorumcusu ve yapay zeka geliştiricisinin asistanısın. Birincil hedefin, sana sunulan her futbol maçı için "
     "en güvenilir, bilimsel verilere dayalı ve doğru tahmini yapmaktır. Bu, sadece istatistik değil, aynı zamanda "
     "takım formunu, oyuncu sakatlıklarını, lig bağlamını ve API'lerden gelen güncel oranları da dikkate almayı gerektirir. "
     "Yanıt formatın (suggestion, confidence, explanation) zorunludur ve tahminlerin yüksek güvenilirlikte olmalıdır. "
@@ -68,6 +68,8 @@ def in_range(iso, min_h, max_h):
     except: return False
 
 # ---------------- API'LER (KORUNDU) ----------------
+# API'ler (API-Football, TheOdds, Football-Data, Sportsdata, iSports, Sportmonks) önceki versiyonlardan
+# hataları düzeltilmiş şekilde korunmuştur. AI entegrasyonu aşağıdadır.
 
 async def fetch_api_football(session):
     today = now_utc().strftime("%Y-%m-%d")
@@ -323,9 +325,10 @@ async def predict_match(m):
     )
     
     try:
+        # Sambanova API Çağrısı (OpenAI formatında)
         async with aiohttp.ClientSession() as s:
             async with s.post(
-                SAMBANOVA_URL, # Sambanova URL'si
+                SAMBANOVA_URL, 
                 json={
                     "model": MODEL, 
                     "messages": [
@@ -335,13 +338,22 @@ async def predict_match(m):
                     "temperature": 0.3, 
                     "max_tokens": 120
                 }, 
-                headers={"Authorization": f"Bearer {SAMBANOVA_KEY}"}, # Sambanova Anahtarı
+                headers={"Authorization": f"Bearer {SAMBANOVA_KEY}"}, 
                 timeout=15
             ) as r:
                 if r.status != 200: 
                     log.error(f"Sambanova API Hata: {r.status} - {await r.text()}")
                     return None
-                txt = (await r.json())["choices"][0]["message"]["content"]
+                
+                # Yanıtın OpenAI formatında olduğunu varsayıyoruz
+                response_data = await r.json()
+                if not response_data.get("choices"):
+                    log.error(f"Sambanova yanıtı beklenenden farklı: {response_data}")
+                    return None
+                    
+                txt = response_data["choices"][0]["message"]["content"]
+                
+                # JSON Ayıklama
                 start_index = txt.find("{")
                 end_index = txt.rfind("}") + 1
                 if start_index == -1 or end_index == -1:
@@ -383,7 +395,7 @@ async def build_coupon(matches, title, max_n, min_conf, type_name):
         )
         posted_matches[str(m["id"])] = now
         
-    return f"🔥 {title} (v68.0 - Sambanova)\n{'─' * 32}\n" + "\n\n".join(lines) + f"\n{'─' * 32}\n<i>Sorumluluk size aittir.</i>"
+    return f"🔥 {title} (v69.0 - Sambanova)\n{'─' * 32}\n" + "\n\n".join(lines) + f"\n{'─' * 32}\n<i>Sorumluluk size aittir.</i>"
 
 # ---------------- GÖREVLER, TEST ve MAIN ----------------
 
@@ -471,7 +483,7 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    log.info("STAKEZONE-AI v68.0 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
+    log.info("STAKEZONE-AI v69.0 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
     
     app.run_polling(
         drop_pending_updates=True,
