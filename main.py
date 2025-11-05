@@ -164,55 +164,57 @@ async def fetch_football_data(session):
 
 
 async def fetch_sportradar(session):
-    # Sportradar Trial Live Matches URL'i tekrar denendi (Yeni anahtar ile 403/404 kontrolü)
-    url = "https://api.sportradar.com/soccer/trial/v4/en/schedules/live_matches.json"
-    params = {"api_key": SPORT_RADAR_KEY} 
+    # Sportradar Trial Live Matches (güncel rota)
+    url = "https://api.sportradar.com/soccer/trial/v4/en/sport_events/schedule.json"
+    params = {"api_key": SPORT_RADAR_KEY}
     
     matches = []
     try:
-        async with session.get(url, params=params, timeout=20) as r:
-            if r.status != 200: 
+        async with session.get(url, params=params, timeout=25) as r:
+            if r.status != 200:
                 log.warning(f"Sportradar Hata: {r.status} - {await r.text()}")
                 return []
             data = await r.json()
-            
-            # JSON yapısı kontrolü: "sport_events" veya "schedule" altından çekme
+
+            # Bazı planlarda veriler 'sport_events' altında gelir
             sport_events = data.get("sport_events", [])
             if not sport_events:
-                 sport_events = data.get("schedule", {}).get("sport_events", [])
+                log.info("Sportradar: 0 maç (sport_events boş)")
+                return []
 
             for match in sport_events:
                 start = match.get("start_time")
-                if not start or not in_range(start, -3, 72): continue
-                
+                if not start or not in_range(start, -3, 72):
+                    continue
+
                 competitors = match.get("competitors", [])
-                if len(competitors) < 2: continue
-                
-                home_team = competitors[0].get("name")
-                away_team = competitors[1].get("name")
-                
-                if not home_team or not away_team: continue
-                
-                live_status = match.get("status") in ["live", "half_time", "in_play"]
-                tournament_name = match.get("tournament", {}).get("name")
-                
+                if len(competitors) < 2:
+                    continue
+
+                home_team = next((c["name"] for c in competitors if c.get("qualifier") == "home"), None)
+                away_team = next((c["name"] for c in competitors if c.get("qualifier") == "away"), None)
+                if not home_team or not away_team:
+                    continue
+
+                live_status = match.get("status", "").lower() in ["live", "inprogress", "in_play"]
+                league_name = match.get("tournament", {}).get("name", "Sportradar Ligi")
+
                 matches.append({
                     "id": f"sr_{match.get('id')}",
                     "home": home_team,
                     "away": away_team,
                     "start": start,
                     "live": live_status,
-                    "odds": [], 
+                    "odds": [],
                     "source": "Sportradar",
-                    "league": tournament_name or "Sportradar Futbol Ligi"
+                    "league": league_name
                 })
 
-            log.info(f"Sportradar: {len(matches)} maç (Trial)")
+            log.info(f"Sportradar: {len(matches)} maç")
             return matches
     except Exception as e:
         log.error(f"Sportradar hata: {e}")
         return []
-
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as s:
         results = await asyncio.gather(
