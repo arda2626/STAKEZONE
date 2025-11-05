@@ -1,4 +1,4 @@
-# bot.py - v64.0 - API Anahtarları Güncellendi ve Sportradar Düzeltmesi Eklendi
+# bot.py - v64.1 - API Anahtarları Güncellendi (Sportradar kaldırıldı, Sportsdata eklendi)
 import os
 import asyncio
 import logging
@@ -13,7 +13,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v64.0")
+log = logging.getLogger("STAKEZONE-AI v64.1")
 
 # Telegram ve AI anahtarları ENV'den çekilir veya buradaki yedek kullanılır
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
@@ -24,8 +24,8 @@ AI_KEY = os.getenv("AI_KEY", "sk-...")
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "e35c566553ae8a89972f76ab04c16bd2")
 THE_ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY", "0180c1cbedb086bdcd526bc0464ee771")
 FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "80a354c67b694ef79c516182ad64aed7")
-# YENİ SPORT RADAR ANAHTARI BURAYA GÜNCELLENDİ
-SPORT_RADAR_KEY = os.getenv("SPORT_RADAR_KEY", "DtjUopc5eVZYlSW5AgMiE9ykr6hKP2t1YqxFPTor") 
+# Sportradar kaldırıldı; yerine Sportsdata key eklendi
+SPORTS_DATA_KEY = os.getenv("SPORTS_DATA_KEY", "32524949c0784f19a8a19c5d5f90e5d2")
 # ------------------------------------------------------------------------
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
@@ -107,7 +107,9 @@ async def fetch_theodds(session):
     }
     try:
         async with session.get(url, params=params, timeout=30) as r:
-            if r.status != 200: return []
+            if r.status != 200: 
+                log.error(f"TheOdds Hata: {r.status} - {await r.text()}")
+                return []
             data = await r.json()
             matches = []
             for game in data:
@@ -163,72 +165,70 @@ async def fetch_football_data(session):
     return all_matches
 
 
-async def fetch_sportradar(session):
-    # Sportradar Trial Live Matches (güncel rota)
-    url = "https://api.sportradar.com/soccer/trial/v4/en/sport_events/schedule.json"
-    params = {"api_key": SPORT_RADAR_KEY}
+# ------------------ SPORTS DATA (YENİ) ------------------
+async def fetch_sportsdata(session):
+    # Sportsdata.io - GamesByDate (bugün)
+    today = now_utc().strftime("%Y-%m-%d")
+    url = f"https://api.sportsdata.io/v4/soccer/scores/json/GamesByDate/{today}"
+    headers = {"Ocp-Apim-Subscription-Key": SPORTS_DATA_KEY}
     
     matches = []
     try:
-        async with session.get(url, params=params, timeout=25) as r:
+        async with session.get(url, headers=headers, timeout=25) as r:
             if r.status != 200:
-                log.warning(f"Sportradar Hata: {r.status} - {await r.text()}")
+                log.warning(f"Sportsdata Hata: {r.status} - {await r.text()}")
                 return []
             data = await r.json()
-
-            # Bazı planlarda veriler 'sport_events' altında gelir
-            sport_events = data.get("sport_events", [])
-            if not sport_events:
-                log.info("Sportradar: 0 maç (sport_events boş)")
-                return []
-
-            for match in sport_events:
-                start = match.get("start_time")
-                if not start or not in_range(start, -3, 72):
+            # data expected to be a list of games
+            for m in data:
+                # Sportsdata uses 'Day' for game datetime in some feeds
+                start = m.get("Day") or m.get("DateTime") or m.get("DayTime")
+                if not start or not in_range(start, -3, 72): 
                     continue
-
-                competitors = match.get("competitors", [])
-                if len(competitors) < 2:
+                home = m.get("HomeTeamName") or m.get("HomeTeam")
+                away = m.get("AwayTeamName") or m.get("AwayTeam")
+                if not home or not away: 
                     continue
-
-                home_team = next((c["name"] for c in competitors if c.get("qualifier") == "home"), None)
-                away_team = next((c["name"] for c in competitors if c.get("qualifier") == "away"), None)
-                if not home_team or not away_team:
-                    continue
-
-                live_status = match.get("status", "").lower() in ["live", "inprogress", "in_play"]
-                league_name = match.get("tournament", {}).get("name", "Sportradar Ligi")
-
+                # Status field values may vary; consider common ones
+                status = m.get("Status") or m.get("GameState") or ""
+                live = status in ["InProgress", "Live", "InProgressCritical"]
+                # Competition could be a dict or string depending on feed
+                comp = m.get("Competition")
+                if isinstance(comp, dict):
+                    league = comp.get("Name") or comp.get("CompetitionName") or "Sportsdata Ligi"
+                else:
+                    league = comp or "Sportsdata Ligi"
                 matches.append({
-                    "id": f"sr_{match.get('id')}",
-                    "home": home_team,
-                    "away": away_team,
+                    "id": f"sd_{m.get('GameId') or m.get('Id')}",
+                    "home": home,
+                    "away": away,
                     "start": start,
-                    "live": live_status,
+                    "live": live,
                     "odds": [],
-                    "source": "Sportradar",
-                    "league": league_name
+                    "source": "Sportsdata",
+                    "league": league
                 })
-
-            log.info(f"Sportradar: {len(matches)} maç")
+            log.info(f"Sportsdata: {len(matches)} maç")
             return matches
     except Exception as e:
-        log.error(f"Sportradar hata: {e}")
+        log.error(f"Sportsdata hata: {e}")
         return []
+
+# ---------------- TÜM MATCH TOPLAMA ----------------
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as s:
         results = await asyncio.gather(
             fetch_api_football(s),
             fetch_theodds(s),
             fetch_football_data(s),
-            fetch_sportradar(s),
+            fetch_sportsdata(s),   # <-- Sportradar yerine Sportsdata çağrılıyor
             return_exceptions=True
         )
     all_matches = [m for res in results if isinstance(res, list) for m in res]
     seen = set()
     unique = []
     for m in all_matches:
-        key = (m.get("home",""), m.get("away",""), m.get("start","")[:16])
+        key = (m.get("home",""), m.get("away",""), str(m.get("start",""))[:16])
         if key not in seen and m.get("home") and m.get("away"):
             seen.add(key)
             unique.append(m)
@@ -356,7 +356,7 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    log.info("STAKEZONE-AI v64.0 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
+    log.info("STAKEZONE-AI v64.1 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
     
     # RAILWAY İÇİN ÖZEL POLLING
     app.run_polling(
