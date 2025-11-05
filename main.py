@@ -22,7 +22,7 @@ AI_KEY = os.getenv("AI_KEY", "sk-...")
 API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2"
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771"
 FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7"
-SPORT_RADAR_KEY = "DtjUopc5eVZYlSW5AgMiE9ykr6hKP2t1YqxFPTor" # YENİ ANAHTAR EKLENDİ!
+SPORT_RADAR_KEY = "6905f97d5be685aa3139c63e" # YENİ ANAHTAR EKLENDİ!
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 MODEL = "gpt-4o"
@@ -56,7 +56,9 @@ async def fetch_api_football(session):
     params = {"date": today, "timezone": "Europe/Istanbul"}
     try:
         async with session.get(url, params=params, headers=headers, timeout=25) as r:
-            if r.status != 200: return []
+            if r.status != 200: 
+                 log.error(f"API-Football Hata: {r.status} - {await r.text()}")
+                 return []
             data = await r.json()
             matches = []
             for f in data.get("response", []):
@@ -151,8 +153,9 @@ async def fetch_football_data(session):
 
 
 async def fetch_sportradar(session):
-    # Sportradar Trial Live Matches URL'i
-    url = "https://api.sportradar.com/soccer/trial/v4/en/schedules/live_matches.json"
+    # Sportradar Trial GÜN TAKVİMİ URL'i (404 hatasını önlemek için canlı maç yerine)
+    today = now_utc().strftime("%Y-%m-%d")
+    url = f"https://api.sportradar.com/soccer/trial/v4/en/schedules/{today}/schedule.json"
     params = {"api_key": SPORT_RADAR_KEY} 
     
     matches = []
@@ -163,29 +166,23 @@ async def fetch_sportradar(session):
                 return []
             data = await r.json()
             
-            # Sportradar JSON yapısı: Çoğu zaman "sport_events" anahtarındadır.
             sport_events = data.get("sport_events", [])
-            # Yedek: Eğer "schedule" altında gelirse (bazı API'lerde değişebilir):
             if not sport_events:
                  sport_events = data.get("schedule", {}).get("sport_events", [])
 
             for match in sport_events:
-                start = match.get("start_time") # Örn: 2024-05-19T13:00:00+00:00
+                start = match.get("start_time")
                 if not start or not in_range(start, -3, 72): continue
                 
                 competitors = match.get("competitors", [])
-                if len(competitors) < 2: continue # Yeterli takım yoksa atla
+                if len(competitors) < 2: continue
                 
-                # Takım isimlerini daha güvenli çekme:
                 home_team = competitors[0].get("name")
                 away_team = competitors[1].get("name")
                 
                 if not home_team or not away_team: continue
                 
-                # Sportradar statüleri: "live", "half_time", "in_play" vb.
                 live_status = match.get("status") in ["live", "half_time", "in_play"]
-
-                # Lig adını "tournament" altından al:
                 tournament_name = match.get("tournament", {}).get("name")
                 
                 matches.append({
@@ -211,7 +208,7 @@ async def fetch_all_matches():
             fetch_api_football(s),
             fetch_theodds(s),
             fetch_football_data(s),
-            fetch_sportradar(s), # SPORT RADAR EKLEDİK
+            fetch_sportradar(s),
             return_exceptions=True
         )
     all_matches = [m for res in results if isinstance(res, list) for m in res]
