@@ -11,37 +11,31 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v63.0 - GERÇEK VERİ BOTU")
+log = logging.getLogger("v63.1 - HATASIZ GERÇEK BOT")
 
 AI_KEY = os.getenv("AI_KEY", "").strip()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-# GERÇEK API ANAHTARLARI (SENİN VERDİĞİN)
+# GERÇEK API ANAHTARLARI
 API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2"
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771"
 FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7"
 
-# OpenAI
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 MODEL = "gpt-4o"
 
-# Zaman
 TR_TZ = timezone(timedelta(hours=3))
 NOW_UTC = datetime.now(timezone.utc)
 
-# Scheduler
 VIP_INTERVAL_HOURS = 3
 DAILY_INTERVAL_HOURS = 12
 LIVE_INTERVAL_HOURS = 1
-INSTANT_INTERVAL_MINUTES = 20
 
-# Filtreler
 MIN_CONFIDENCE = 70
 LIVE_MIN_CONFIDENCE = 85
 DAILY_MAX_ODDS = 2.0
 
-# State
 posted_matches = {}
 last_run = {}
 ai_calls = 0
@@ -67,7 +61,7 @@ def safe_get(d, *keys):
         d = d.get(k) if isinstance(d, dict) else None
     return d
 
-# ---------------- GERÇEK API ÇEKİM ----------------
+# ---------------- GERÇEK API ----------------
 async def fetch_api_football(session):
     url = "https://v3.football.api-sports.io/fixtures"
     params = {"from": NOW_UTC.strftime("%Y-%m-%d"), "to": (NOW_UTC + timedelta(days=3)).strftime("%Y-%m-%d")}
@@ -91,7 +85,9 @@ async def fetch_api_football(session):
                     "source": "API-Football"
                 })
             return matches
-    except: return []
+    except Exception as e:
+        log.warning(f"API-Football hata: {e}")
+        return []
 
 async def fetch_theodds(session):
     url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
@@ -114,7 +110,9 @@ async def fetch_theodds(session):
                     "source": "TheOdds"
                 })
             return matches
-    except: return []
+    except Exception as e:
+        log.warning(f"TheOdds hata: {e}")
+        return []
 
 async def fetch_football_data(session):
     url = "https://api.football-data.org/v4/competitions/PL/matches"
@@ -138,7 +136,9 @@ async def fetch_football_data(session):
                     "source": "Football-Data"
                 })
             return matches
-    except: return []
+    except Exception as e:
+        log.warning(f"Football-Data hata: {e}")
+        return []
 
 async def fetch_all_real_matches():
     async with aiohttp.ClientSession() as session:
@@ -154,7 +154,6 @@ async def fetch_all_real_matches():
         if isinstance(res, list):
             all_matches.extend(res)
     
-    # Tekilleştirme
     seen = set()
     unique = []
     for m in all_matches:
@@ -194,9 +193,8 @@ async def predict_match(m):
 Maç: {m['home']} vs {m['away']}
 Başlama: {to_local_str(m['start'])} (TR)
 Canlı: {'Evet' if m['live'] else 'Hayır'}
-Spor: Futbol
 
-En iyi bahis tahminini yap. Sadece 1 tercih.
+En iyi 1 bahis tahmini yap.
 JSON formatı:
 {{"suggestion": "MS 1", "confidence": 85, "explanation": "Kısa analiz..."}}
 """
@@ -211,15 +209,19 @@ JSON formatı:
                 if r.status != 200: return None
                 data = await r.json()
                 content = data["choices"][0]["message"]["content"]
-                return json.loads(content[content.find("{"):content.rfind("}")+1])
-    except: return None
+                start = content.find("{")
+                end = content.rfind("}") + 1
+                return json.loads(content[start:end])
+    except Exception as e:
+        log.warning(f"OpenAI hata: {e}")
+        return None
 
 # ---------------- KUPON OLUŞTUR ----------------
 async def build_coupon(matches, title, max_n, min_conf, coupon_type):
     candidates = []
     now = datetime.now(timezone.utc)
     for m in matches:
-        mid = m["id"]
+        mid = str(m["id"])
         if mid in posted_matches and (now - posted_matches[mid]).total_seconds() < 7200:
             continue
         pred = await predict_match(m)
@@ -240,27 +242,20 @@ async def build_coupon(matches, title, max_n, min_conf, coupon_type):
         odd_text = f"Oran: <b>{odd:.2f}</b>" if odd else "Oran: Bilinmiyor"
         lines.append(
             f"<b>{m['home']} vs {m['away']}</b>\n"
-            f"   📅 {to_local_str(m['start'])} | {'CANLI' if m['live'] else 'Öncesi'}\n"
-            f"   📈 <b>{pred['suggestion']}</b> (%{pred['confidence']})\n"
+            f"   {to_local_str(m['start'])} | {'CANLI' if m['live'] else 'Öncesi'}\n"
+            f"   <b>{pred['suggestion']}</b> (%{pred['confidence']})\n"
             f"   {odd_text}\n"
             f"   <i>{pred['explanation']}</i>"
         )
-        posted_matches[m["id"]] = now
+        posted_matches[str(m["id"])] = now
     
-    header = f"DIAMOND {' '.join(title.split())}\n{'─'*30}\n"
-    footer = f"\n{'─'*30}\n<i>Risk vardır. Sorumluluk size aittir.</i>"
+    header = f"{' '.join(title.split())}\n{'─'*30}\n"
+    footer = f"\n{'─'*30}\n<i>Sorumluluk size aittir.</i>"
     return header + "\n\n".join(lines) + footer
 
 # ---------------- GÖREVLER ----------------
-async def send_coupon(app, text):
-    try:
-        await app.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="HTML")
-        log.info(f"Kupon gönderildi: {text.split()[1]}")
-    except Exception as e:
-        log.error(f"Gönderim hatası: {e}")
-
-async def job_runner(app):
-    await asyncio.sleep(5)
+async def job_runner(app: Application):
+    await asyncio.sleep(10)
     while True:
         try:
             matches = await fetch_all_real_matches()
@@ -269,13 +264,13 @@ async def job_runner(app):
             # VIP
             if "VIP" not in last_run or (now - last_run["VIP"]).total_seconds() > VIP_INTERVAL_HOURS*3600:
                 text = await build_coupon(matches, "VIP SÜRPRİZ", 1, 85, "VIP")
-                if text: await send_coupon(app, text)
+                if text: await app.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="HTML")
                 last_run["VIP"] = now
 
             # GÜNLÜK
             if "DAILY" not in last_run or (now - last_run["DAILY"]).total_seconds() > DAILY_INTERVAL_HOURS*3600:
                 text = await build_coupon(matches, "GÜNLÜK GARANTİ", 3, 75, "DAILY")
-                if text: await send_coupon(app, text)
+                if text: await app.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="HTML")
                 last_run["DAILY"] = now
 
             # CANLI
@@ -283,7 +278,7 @@ async def job_runner(app):
                 live_matches = [m for m in matches if m["live"]]
                 if live_matches:
                     text = await build_coupon(live_matches, "CANLI FIRSAT", 2, 80, "LIVE")
-                    if text: await send_coupon(app, text)
+                    if text: await app.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="HTML")
                 last_run["LIVE"] = now
 
             await asyncio.sleep(60)
@@ -302,19 +297,23 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Kupon oluşturulamadı.")
 
 # ---------------- ANA ----------------
-async def main():
+def main():
     if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
-        log.critical("ENV eksik!")
+        log.critical("ENV eksik! TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID gerekli.")
         return
-    
+
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
-    
-    async def post_init(application):
+
+    # post_init ile job_runner'ı başlat
+    async def post_init(application: Application):
         asyncio.create_task(job_runner(application))
-    
+
     app.post_init = post_init
-    await app.run_polling()
+
+    log.info("v63.1 - HATASIZ BOT BAŞLADI")
+    # BURASI KRİTİK: await YOK, SENKRON!
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()  # asyncio.run DEĞİL!
