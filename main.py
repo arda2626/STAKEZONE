@@ -1,4 +1,4 @@
-# bot.py - v66.0 - Hatalar Düzeltildi, Tüm API'ler Entegre
+# bot.py - v68.0 - Sambanova LLM Anahtarı Entegre
 import os
 import asyncio
 import logging
@@ -12,23 +12,25 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import Conflict
 
 # ***************************************************************
-# 🔴 UYARI: LOG'LARINIZDAKİ EN KRİTİK HATA AŞAĞIDAKİDİR:
-# "You exceeded your current quota..." (OpenAI 429 Hata Kodu)
-# Bu hatayı DÜZELTMEK İÇİN SADECE SİZİN:
-# OpenAI hesabınıza (platform.openai.com) giriş yapıp KREDİ YÜKLEMENİZ GEREKİR.
-# Kod, bu hatayı çözemez.
+# 🔴 UYARI: Sambanova'dan aldığınız kesin URL adresi bu değilse,
+# lütfen SAMBANOVA_URL değişkenini güncelleyin.
 # ***************************************************************
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v66.0")
+log = logging.getLogger("STAKEZONE-AI v68.0")
 
-# Telegram ve AI anahtarları ENV'den çekilir veya buradaki yedek kullanılır
+# Telegram anahtarı ENV'den çekilir veya buradaki yedek kullanılır
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNyLYk3KahAL2k9ABOkdL7eFIb7s")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "@stakedrip")
-AI_KEY = os.getenv("AI_KEY", "sk-...")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1001234567890")
 
-# --- API Anahtarları ---
+# --- AI Anahtarları (Sambanova) ---
+SAMBANOVA_KEY = os.getenv("SAMBANOVA_KEY", "2d9ff014-9759-4166-bed7-bfaf5f411ced") # ENTEGRE EDİLDİ
+SAMBANOVA_URL = os.getenv("SAMBANOVA_URL", "https://api.sambanova.ai/v1/chat/completions") # Tahmini Chat Endpoint URL'si
+MODEL = "sambanova-llm" 
+# ------------------------------------------------------------------------
+
+# --- Spor API Anahtarları (Korundu) ---
 API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "3838237ec41218c2572ce541708edcfd") 
 THE_ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY", "0180c1cbedb086bdcd526bc0464ee771")
 FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "80a354c67b694ef79c516182ad64aed7")
@@ -37,8 +39,6 @@ ISPORTS_API_KEY = os.getenv("ISPORTS_API_KEY", "rCiLp0QXNSrfV5oc")
 SPORTMONKS_API_KEY = os.getenv("SPORTMONKS_API_KEY", "cbcas9S9m69LZOcIUR591VpWVjwgppjsLI0o3u9XSnCLWUTqxQbhmpXXXXpD")
 # ------------------------------------------------------------------------
 
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-MODEL = "gpt-4o"
 TR_TZ = timezone(timedelta(hours=3))
 SYSTEM_PROMPT = (
     "Sen, STAKEZONE-AI adlı yapay zeka tarafından yönetilen, üst düzey bir kumarbaz, bahis tahmincisi, "
@@ -67,10 +67,9 @@ def in_range(iso, min_h, max_h):
         return min_h <= (dt - now_utc()).total_seconds() / 3600 <= max_h
     except: return False
 
-# ---------------- API'LER ----------------
+# ---------------- API'LER (KORUNDU) ----------------
 
 async def fetch_api_football(session):
-    # API-Football kodunuz korundu
     today = now_utc().strftime("%Y-%m-%d")
     tomorrow = (now_utc() + timedelta(days=1)).strftime("%Y-%m-%d")
     url = "https://v3.football.api-sports.io/fixtures"
@@ -106,11 +105,10 @@ async def fetch_api_football(session):
         return []
 
 async def fetch_theodds(session):
-    # DÜZELTME: "INVALID_REGION" hatasını çözmek için 'tr' kaldırıldı
     url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
     params = {
         "apiKey": THE_ODDS_API_KEY,
-        "regions": "eu,us",  # TR kaldırıldı
+        "regions": "eu,us", 
         "markets": "h2h,totals,btts",
         "oddsFormat": "decimal",
         "daysFrom": 3 
@@ -145,7 +143,6 @@ async def fetch_theodds(session):
         return []
 
 async def fetch_football_data(session):
-    # Football-Data kodunuz korundu
     comps = ["PL", "BL1", "SA", "FL1", "PD"]
     today = now_utc().strftime("%Y-%m-%d")
     day_after = (now_utc() + timedelta(days=2)).strftime("%Y-%m-%d")
@@ -176,12 +173,10 @@ async def fetch_football_data(session):
     return all_matches
 
 async def fetch_sportsdata(session):
-    # DÜZELTME: Sürekli 404 hatası verdiği için şimdilik devre dışı bırakıldı.
     log.warning("Sportsdata API, sürekli 404 hatası verdiği için şimdilik devre dışı.")
     return []
 
 async def fetch_isports(session):
-    # DÜZELTME: SSLCertVerificationError hatasını atlamak için SSL doğrulama kapatıldı.
     url = "https://api.isportsapi.com/sport/football/schedule"
     today = now_utc().strftime("%Y-%m-%d")
     params = {
@@ -191,7 +186,6 @@ async def fetch_isports(session):
     }
     matches = []
     try:
-        # verify_ssl=False ile hatayı geçici olarak atla
         async with session.get(url, params=params, timeout=20, ssl=False) as r:
             if r.status != 200:
                 log.error(f"iSports Hata: {r.status} - {await r.text()}")
@@ -218,12 +212,11 @@ async def fetch_isports(session):
         return []
 
 async def fetch_sportmonks(session):
-    # DÜZELTME: 400 Bad Request hatasını çözmek için fikstür rotası ve parametreler güncellendi.
-    url = "https://api.sportmonks.com/v3/football/fixtures/upcoming" # Daha genel rota
+    url = "https://api.sportmonks.com/v3/football/fixtures/upcoming"
     params = {
         "api_token": SPORTMONKS_API_KEY,
         "include": "participants;league",
-        "per_page": 50 # Limit için varsayılan eklendi
+        "per_page": 50 
     }
     matches = []
     try:
@@ -236,10 +229,8 @@ async def fetch_sportmonks(session):
                 start = m.get("starting_at")
                 if not start or not in_range(start, -3, 72): continue
                 
-                # Takım isimlerini participants'tan çekme
                 participants_data = m.get("participants", {}).get("data", [])
                 teams = {p["meta"]["location"]: p["name"] for p in participants_data if p.get("meta", {}).get("location")}
-                
                 league = m.get("league", {}).get("data", {}).get("name", "Sportmonks Ligi")
                 
                 matches.append({
@@ -258,7 +249,6 @@ async def fetch_sportmonks(session):
         log.error(f"Sportmonks hata: {e}")
         return []
 
-
 # ---------------- TÜM MATCH TOPLAMA ----------------
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as s:
@@ -266,7 +256,7 @@ async def fetch_all_matches():
             fetch_api_football(s),
             fetch_theodds(s),
             fetch_football_data(s),
-            fetch_sportsdata(s), # Devre dışı
+            fetch_sportsdata(s), 
             fetch_isports(s),
             fetch_sportmonks(s),
             return_exceptions=True
@@ -282,8 +272,7 @@ async def fetch_all_matches():
     log.info(f"TOPLAM MAÇ: {len(unique)}")
     return unique
 
-# ---------------- ORAN / AI / KUPON (AYNI) ----------------
-# Oran çekme ve AI tahmin fonksiyonları korundu
+# ---------------- ORAN / AI / KUPON ----------------
 def get_odd(m, suggestion):
     if m["source"] != "TheOdds": return None
     for book in m.get("odds", []):
@@ -336,7 +325,7 @@ async def predict_match(m):
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post(
-                OPENAI_URL, 
+                SAMBANOVA_URL, # Sambanova URL'si
                 json={
                     "model": MODEL, 
                     "messages": [
@@ -346,21 +335,21 @@ async def predict_match(m):
                     "temperature": 0.3, 
                     "max_tokens": 120
                 }, 
-                headers={"Authorization": f"Bearer {AI_KEY}"}, 
+                headers={"Authorization": f"Bearer {SAMBANOVA_KEY}"}, # Sambanova Anahtarı
                 timeout=15
             ) as r:
                 if r.status != 200: 
-                    log.error(f"AI Call Error: {r.status} - {await r.text()}")
+                    log.error(f"Sambanova API Hata: {r.status} - {await r.text()}")
                     return None
                 txt = (await r.json())["choices"][0]["message"]["content"]
                 start_index = txt.find("{")
                 end_index = txt.rfind("}") + 1
                 if start_index == -1 or end_index == -1:
-                    log.error(f"AI JSON Parse Error: {txt}")
+                    log.error(f"Sambanova JSON Parse Error: {txt}")
                     return None
                 return json.loads(txt[start_index:end_index])
     except Exception as e: 
-        log.error(f"AI Tahmin Hatası: {e}")
+        log.error(f"Sambanova Tahmin Hatası: {e}")
         return None
 
 async def build_coupon(matches, title, max_n, min_conf, type_name):
@@ -394,9 +383,10 @@ async def build_coupon(matches, title, max_n, min_conf, type_name):
         )
         posted_matches[str(m["id"])] = now
         
-    return f"🔥 {title} (v66.0)\n{'─' * 32}\n" + "\n\n".join(lines) + f"\n{'─' * 32}\n<i>Sorumluluk size aittir.</i>"
+    return f"🔥 {title} (v68.0 - Sambanova)\n{'─' * 32}\n" + "\n\n".join(lines) + f"\n{'─' * 32}\n<i>Sorumluluk size aittir.</i>"
 
-# ---------------- GÖREVLER ----------------
+# ---------------- GÖREVLER, TEST ve MAIN ----------------
+
 async def job_runner(app):
     await asyncio.sleep(15)
     while True:
@@ -404,7 +394,6 @@ async def job_runner(app):
             matches = await fetch_all_matches()
             now = now_utc()
             
-            # ... Kupon Oluşturma Mantığı Korundu ...
             if "VIP" not in last_run or (now - last_run["VIP"]).total_seconds() > 3*3600:
                 text = await build_coupon(matches, "VIP SÜRPRİZ KUPON", 1, 84, "VIP")
                 if text: await app.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="HTML")
@@ -427,7 +416,6 @@ async def job_runner(app):
             log.exception(f"Job error: {e}")
             await asyncio.sleep(60)
 
-# ---------------- TEST ----------------
 async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.message.chat_id) != str(TELEGRAM_CHAT_ID):
         await update.message.reply_text("Bu komutu sadece yetkili kanalda kullanabilirsiniz.")
@@ -440,7 +428,7 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     test_match = matches[0]
-    await update.message.reply_text(f"İlk maç için AI tahmini çekiliyor: {test_match['home']} vs {test_match['away']}")
+    await update.message.reply_text(f"İlk maç için AI tahmini çekiliyor (Sambanova): {test_match['home']} vs {test_match['away']}")
     
     pred = await predict_match(test_match)
     
@@ -453,13 +441,11 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"• {m['home']} vs {m['away']} | {to_tr(m['start'])} | Kaynak: {m['source']}")
         await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     else:
-        await update.message.reply_text("Maçlar bulundu, ancak AI tahmininde bir hata oluştu (OpenAI kota sorunu, Rate Limit vb.).")
+        await update.message.reply_text("Maçlar bulundu, ancak AI tahmininde bir hata oluştu (Sambanova API hatası, Rate Limit vb.). Lütfen API URL'sini ve kota durumunu kontrol edin.")
 
-
-# ---------------- ZOMBİ ÖLDÜRÜCÜ ----------------
 def main():
-    if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
-        log.critical("ENV EKSİK!")
+    if not all([TELEGRAM_TOKEN, SAMBANOVA_KEY, TELEGRAM_CHAT_ID]):
+        log.critical("ENV EKSİK! Lütfen TELEGRAM_TOKEN, SAMBANOVA_KEY ve TELEGRAM_CHAT_ID değerlerini kontrol edin.")
         return
 
     try:
@@ -485,7 +471,7 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    log.info("STAKEZONE-AI v66.0 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
+    log.info("STAKEZONE-AI v68.0 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
     
     app.run_polling(
         drop_pending_updates=True,
