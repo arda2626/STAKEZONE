@@ -1,4 +1,4 @@
-# bot.py - v64.1 - API Anahtarları Güncellendi (Sportradar kaldırıldı, Sportsdata eklendi)
+# bot.py - v64.2 - TheOdds + Sportsdata düzeltmesi (tam - job'lar korunmuştur)
 import os
 import asyncio
 import logging
@@ -13,7 +13,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v64.1")
+log = logging.getLogger("STAKEZONE-AI v64.2")
 
 # Telegram ve AI anahtarları ENV'den çekilir veya buradaki yedek kullanılır
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
@@ -44,38 +44,31 @@ def to_tr(iso):
     except: return "?"
 def in_range(iso, min_h, max_h):
     try:
-        # ISO formatını işleme
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
         if not dt.tzinfo:
-             # Eğer zaman dilimi yoksa UTC olduğunu varsay
-             dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+            dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
         return min_h <= (dt - now_utc()).total_seconds() / 3600 <= max_h
     except: return False
 
 # ---------------- API'LER ----------------
 
 async def fetch_api_football(session):
-    # Bugün ve yarın arasındaki maçları çekmek için tarih aralığı kullanıldı.
     today = now_utc().strftime("%Y-%m-%d")
     tomorrow = (now_utc() + timedelta(days=1)).strftime("%Y-%m-%d")
     url = "https://v3.football.api-sports.io/fixtures"
     headers = {"x-apisports-key": API_FOOTBALL_KEY}
-    
-    # Tarih aralığını kullan
-    params = {"from": today, "to": tomorrow, "timezone": "Europe/Istanbul"} 
-    
+    params = {"from": today, "to": tomorrow, "timezone": "Europe/Istanbul"}
     try:
         async with session.get(url, params=params, headers=headers, timeout=25) as r:
-            if r.status != 200: 
-                 log.error(f"API-Football Hata: {r.status} - {await r.text()}")
-                 return []
+            if r.status != 200:
+                log.error(f"API-Football Hata: {r.status} - {await r.text()}")
+                return []
             data = await r.json()
             matches = []
             for f in data.get("response", []):
                 fix = f.get("fixture", {})
                 start = fix.get("date")
-                # 3 saat öncesi ve 72 saat sonrası aralığı kontrol edilir
-                if not start or not in_range(start, -3, 72): continue 
+                if not start or not in_range(start, -3, 72): continue
                 teams = f.get("teams", {})
                 league = f.get("league", {}).get("name", "Lig")
                 matches.append({
@@ -95,19 +88,19 @@ async def fetch_api_football(session):
         return []
 
 async def fetch_theodds(session):
-    url = "https://api.the-odds-api.com/v4/sports/odds"
+    # DÜZELTME: doğru TheOdds rota (soccer)
+    url = "https://api.the-odds-api.com/v4/sports/soccer/odds"
     today = now_utc().strftime("%Y-%m-%d")
     params = {
         "apiKey": THE_ODDS_API_KEY,
         "regions": "eu,us,tr",
         "markets": "h2h,totals,btts",
         "oddsFormat": "decimal",
-        "date": today,
-        "sport": "soccer"
+        "date": today
     }
     try:
         async with session.get(url, params=params, timeout=30) as r:
-            if r.status != 200: 
+            if r.status != 200:
                 log.error(f"TheOdds Hata: {r.status} - {await r.text()}")
                 return []
             data = await r.json()
@@ -164,35 +157,36 @@ async def fetch_football_data(session):
     log.info(f"Football-Data: {len(all_matches)} maç")
     return all_matches
 
-
-# ------------------ SPORTS DATA (YENİ) ------------------
+# ------------------ SPORTS DATA ------------------
 async def fetch_sportsdata(session):
-    # Sportsdata.io - GamesByDate (bugün)
     today = now_utc().strftime("%Y-%m-%d")
     url = f"https://api.sportsdata.io/v4/soccer/scores/json/GamesByDate/{today}"
     headers = {"Ocp-Apim-Subscription-Key": SPORTS_DATA_KEY}
-    
     matches = []
     try:
         async with session.get(url, headers=headers, timeout=25) as r:
-            if r.status != 200:
+            if r.status == 404:
+                log.warning("Sportsdata: GamesByDate kapalı, GamesBySeason/EPL/2025 deneniyor...")
+                url2 = "https://api.sportsdata.io/v4/soccer/scores/json/GamesBySeason/EPL/2025"
+                async with session.get(url2, headers=headers, timeout=25) as r2:
+                    if r2.status == 200:
+                        data = await r2.json()
+                    else:
+                        log.warning(f"Sportsdata fallback başarısız: {r2.status} - {await r2.text()}")
+                        return []
+            elif r.status != 200:
                 log.warning(f"Sportsdata Hata: {r.status} - {await r.text()}")
                 return []
-            data = await r.json()
-            # data expected to be a list of games
+            else:
+                data = await r.json()
             for m in data:
-                # Sportsdata uses 'Day' for game datetime in some feeds
                 start = m.get("Day") or m.get("DateTime") or m.get("DayTime")
-                if not start or not in_range(start, -3, 72): 
-                    continue
+                if not start or not in_range(start, -3, 72): continue
                 home = m.get("HomeTeamName") or m.get("HomeTeam")
                 away = m.get("AwayTeamName") or m.get("AwayTeam")
-                if not home or not away: 
-                    continue
-                # Status field values may vary; consider common ones
+                if not home or not away: continue
                 status = m.get("Status") or m.get("GameState") or ""
                 live = status in ["InProgress", "Live", "InProgressCritical"]
-                # Competition could be a dict or string depending on feed
                 comp = m.get("Competition")
                 if isinstance(comp, dict):
                     league = comp.get("Name") or comp.get("CompetitionName") or "Sportsdata Ligi"
@@ -221,7 +215,7 @@ async def fetch_all_matches():
             fetch_api_football(s),
             fetch_theodds(s),
             fetch_football_data(s),
-            fetch_sportsdata(s),   # <-- Sportradar yerine Sportsdata çağrılıyor
+            fetch_sportsdata(s),
             return_exceptions=True
         )
     all_matches = [m for res in results if isinstance(res, list) for m in res]
@@ -356,7 +350,7 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    log.info("STAKEZONE-AI v64.1 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
+    log.info("STAKEZONE-AI v64.2 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
     
     # RAILWAY İÇİN ÖZEL POLLING
     app.run_polling(
