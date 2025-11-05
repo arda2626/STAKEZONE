@@ -1127,7 +1127,7 @@ async def job_runner(app: Application):
             
         await asyncio.sleep(60) # Her dakika kontrol et
 
-def main():
+async def run_app():
     if not TELEGRAM_TOKEN: log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor."); sys.exit(1)
     if not AI_KEY: log.error("AI_KEY ayarlı değil. Çıkılıyor."); sys.exit(1)
     if not TELEGRAM_CHAT_ID: log.critical("TELEGRAM_CHAT_ID ayarlı değil. Çıkılıyor."); sys.exit(1)
@@ -1143,14 +1143,17 @@ def main():
     
     log.info("v62.9.4 (Düzeltilmiş API) başlatıldı. Telegram polling başlatılıyor...")
     
-    try:
-        app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-    except Conflict as e:
-        log.critical(f"Kritik Telegram Hatası: İki bot örneği çalışıyor olabilir. Lütfen tek bir bot örneğinin çalıştığından emin olun. Hata: {e}")
-        sys.exit(1)
-
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    await app.updater.idle()
 
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
-        main() 
+        asyncio.run(run_app())
+    except KeyboardInterrupt:
+        log.info("Durduruldu.")
+    except Exception as e:
+        log.critical(f"Kritik hata: {e}", exc_info=True)
+        sys.exit(1)
