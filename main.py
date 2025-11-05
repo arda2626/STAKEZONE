@@ -1064,6 +1064,8 @@ async def job_runner(app: Application):
             # --- İLK ÇALIŞTIRMA BLOĞU ---
             if not initial_run_done:
                 log.info("İlk kupon yayınları zamanlandı.")
+                # İlk çalıştırmada job_runner asenkron bir görev olarak başlatıldığı için,
+                # initial_runs_scheduler'ı çağırdığımızda, görevler zamanlanacaktır.
                 await initial_runs_scheduler(app, all_matches)
                 initial_run_done = True
             
@@ -1138,6 +1140,7 @@ async def run_app():
     
     app.add_handler(CommandHandler("test", cmd_test))
     async def post_init_callback(application: Application):
+        # post_init, initialize tamamlandıktan sonra çağrılır.
         asyncio.create_task(job_runner(application))
         log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
 
@@ -1145,10 +1148,11 @@ async def run_app():
     
     log.info("v62.9.4 (Kritik Hatalar Giderildi) başlatılıyor.")
     
-    await app.initialize()
+    # DÜZELTİLDİ: initialize çağrısı kaldırıldı. app.run_polling, initialize ve start işlemlerini kendisi yönetecektir.
+    # await app.initialize() <--- KALDIRILDI!
     
     log.info("Telegram polling başlatılıyor...")
-    # DÜZELTİLDİ: app.updater.idle() yerine modern app.run_polling() kullanıldı.
+    
     await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True) 
 
 if __name__ == "__main__":
