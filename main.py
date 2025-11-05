@@ -1,4 +1,4 @@
-# bot.py - v63.5 - RAILWAY İÇİN ÖZEL
+# bot.py - v63.6 - RAILWAY ZOMBİ ÖLDÜRÜCÜ
 import os
 import asyncio
 import logging
@@ -13,7 +13,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v63.5")
+log = logging.getLogger("STAKEZONE-AI v63.6")
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1001234567890")
@@ -43,7 +43,7 @@ def in_range(iso, min_h, max_h):
         return min_h <= (dt - now_utc()).total_seconds() / 3600 <= max_h
     except: return False
 
-# ---------------- API'LER ----------------
+# ---------------- API'LER (AYNI) ----------------
 async def fetch_api_football(session):
     today = now_utc().strftime("%Y-%m-%d")
     url = "https://v3.football.api-sports.io/fixtures"
@@ -158,7 +158,7 @@ async def fetch_all_matches():
     log.info(f"TOPLAM MAÇ: {len(unique)}")
     return unique
 
-# ---------------- ORAN ----------------
+# ---------------- ORAN / AI / KUPON (AYNI) ----------------
 def get_odd(m, suggestion):
     if m["source"] != "TheOdds": return None
     for book in m.get("odds", []):
@@ -177,7 +177,6 @@ def get_odd(m, suggestion):
                 return round([o["price"] for o in outcomes if o["name"] == "Yes"][0], 2)
     return None
 
-# ---------------- AI ----------------
 async def predict_match(m):
     global ai_calls, ai_reset
     now = now_utc()
@@ -193,7 +192,6 @@ async def predict_match(m):
                 return json.loads(txt[txt.find("{"):txt.rfind("}")+1])
     except: return None
 
-# ---------------- KUPON ----------------
 async def build_coupon(matches, title, max_n, min_conf, type_name):
     candidates = []
     now = now_utc()
@@ -258,7 +256,7 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• {m['home']} vs {m['away']} | {to_tr(m['start'])} | {m['source']}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
-# ---------------- RAILWAY İÇİN ÇAKIŞMA ÖNLEYİCİ ----------------
+# ---------------- ZOMBİ ÖLDÜRÜCÜ ----------------
 def main():
     if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
         log.critical("ENV EKSİK!")
@@ -272,21 +270,24 @@ def main():
 
     app.post_init = post_init
 
-    # HATA YÖNETİCİSİ
+    # ZOMBİ BOT ÖLDÜRÜCÜ
     async def error_handler(update, context):
         if isinstance(context.error, Conflict):
-            log.critical("ÇAKIŞMA! Eski bot çalışıyor. 5 saniye sonra kapanıyor...")
-            await asyncio.sleep(5)
-            os._exit(1)  # ZORLA KAPAT
+            log.critical("ZOMBİ BOT TESPİT EDİLDİ! 3 saniye içinde kapanıyor...")
+            await asyncio.sleep(3)
+            os._exit(0)  # TEMİZ KAPAN
 
     app.add_error_handler(error_handler)
 
-    log.info("STAKEZONE-AI v63.5 RAILWAY İÇİN BAŞLADI")
+    log.info("STAKEZONE-AI v63.6 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
+    
+    # RAILWAY İÇİN ÖZEL POLLING
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=Update.ALL_TYPES,
         timeout=30,
-        poll_interval=1.0
+        poll_interval=2.0,
+        bootstrap_retries=3
     )
 
 if __name__ == "__main__":
