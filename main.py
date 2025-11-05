@@ -28,7 +28,7 @@ API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2"
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771" 
 SPORTSMONKS_KEY = "AirVTC8HLItQs55iaPnxp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ"
 ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
-FOOTYSTATS_KEY = "example"  # Düzeltilmiş: Test anahtarı "example" olarak değiştirildi
+FOOTYSTATS_KEY = "test85g57" 
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
 FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7" 
 
@@ -63,14 +63,13 @@ NBA_MIN_ODDS = 1.20
 NO_ODDS_MIN_CONFIDENCE = 80   
 
 # Dinamik Maç Başlama Saatleri (Saat cinsinden fark)
-# İSTEKLERİNİZ DOĞRULTUSUNDA GÜNCELLENMİŞTİR
 MATCH_TIME_HORIZON = {
-    "VIP": {"min": 0, "max": 24},      # İSTEK: 0 saat - 24 saat arası
-    "DAILY": {"min": 0, "max": 24},    # İSTEK: 0 saat - 24 saat arası
-    "NBA": {"min": 0.5, "max": 24},    # 30 dakika - 24 saat arası (Mevcut korundu)
-    "INSTANT": {"min": 0, "max": 96},  # İSTEK: Tüm zamanlar (96 saate çıkarıldı)
-    "LIVE": {"min": -120, "max": 0.5}, # İSTEK: Geniş zaman, asıl filtre canlı durumudur.
-    "TEST": {"min": 0.5, "max": 72},
+    "VIP": {"min": 0.5, "max": 168},   # Genişletildi
+    "DAILY": {"min": 6, "max": 168},   # Genişletildi
+    "NBA": {"min": 0.5, "max": 168},   # Genişletildi
+    "INSTANT": {"min": 0.5, "max": 168},
+    "LIVE": {"min": -1, "max": 0.5},  
+    "TEST": {"min": 0.5, "max": 168},
 }
 
 # OpenAI Limit
@@ -258,11 +257,15 @@ def get_odd_for_market(m: dict, prediction_suggestion: str):
 async def fetch_football_data(session):
     name = "Football-Data"
     res = []
-    url = "https://api.football-data.org/v4/matches" 
+    now = datetime.now(timezone.utc)
+    from_date = now.strftime("%Y-%m-%d")
+    to_date = (now + timedelta(days=7)).strftime("%Y-%m-%d")
+    url = "https://api.football-data.org/v4/competitions/PL/matches"  # Premier Lig için örnek, diğer ligler eklenebilir
+    params = {"dateFrom": from_date, "dateTo": to_date}
     headers = {"X-Auth-Token": FOOTBALL_DATA_KEY}
     if not FOOTBALL_DATA_KEY: log.info(f"{name} Key eksik/ayarlı değil. Atlanıyor."); return res
     try:
-        async with session.get(url, headers=headers, timeout=12) as r:
+        async with session.get(url, params=params, headers=headers, timeout=12) as r:
             if r.status == 429: log.error(f"{name} HATA: Hız limiti aşıldı (429)."); return res
             elif r.status == 403: log.error(f"{name} HATA: İzin verilmedi/Yanlış anahtar (403)."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}."); return res
@@ -272,7 +275,7 @@ async def fetch_football_data(session):
                 start = it.get("utcDate") 
                 status = it.get("status")
                 is_live = status in ("IN_PLAY", "PAUSED")
-                if status in ("FINISHED", "SUSPENDED", "POSTPONED") or (status != "SCHEDULED" and not is_live) or (not is_live and not within_time_range(start, 0, 24)): continue 
+                if status in ("FINISHED", "SUSPENDED", "POSTPONED") or (status != "SCHEDULED" and not is_live) or (not is_live and not within_time_range(start, 0, 168)): continue 
                 res.append({"id": it.get('id'),"home": safe_get(it, "homeTeam", "name"),"away": safe_get(it, "awayTeam", "name"),"start": start,"source": name,"live": is_live,"odds": {},"sport": safe_get(it, "competition", "name") or "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -283,7 +286,7 @@ async def fetch_api_football(session):
     name = "API-Football"
     res = []
     url = "https://v3.football.api-sports.io/fixtures"
-    end_time = datetime.now(timezone.utc) + timedelta(hours=48) # 48 saate çıkarıldı
+    end_time = datetime.now(timezone.utc) + timedelta(days=7)  # Genişletildi
     params = {"from": datetime.now(timezone.utc).strftime("%Y-%m-%d"), "to": end_time.strftime("%Y-%m-%d")}
     headers = {"x-apisports-key": API_FOOTBALL_KEY}
     if not API_FOOTBALL_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
@@ -299,7 +302,7 @@ async def fetch_api_football(session):
                 status_short = (safe_get(fix, "status", "short") or "").lower()
                 start = fix.get("date")
                 is_live = status_short not in ("ns", "tbd", "ft", "ht") and status_short not in ("ns", "tbd")
-                if not is_live and not within_time_range(start, 0, 48): continue
+                if not is_live and not within_time_range(start, 0, 168): continue
                 res.append({"id": safe_get(fix,'id'),"home": safe_get(it,"teams","home","name") or "Home","away": safe_get(it,"teams","away","name") or "Away","start": start,"source": name,"live": is_live,"odds": safe_get(it, "odds") or {},"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -310,7 +313,7 @@ async def fetch_the_odds(session):
     name = "TheOdds"
     res = []
     url = "https://api.the-odds-api.com/v4/sports/upcoming/odds" 
-    params = {"regions":"eu","markets":"h2h,totals,btts,spreads","oddsFormat":"decimal","dateFormat":"iso","apiKey":THE_ODDS_API_KEY, "sports": "basketball_nba,soccer,icehockey_nhl"} 
+    params = {"regions":"eu","markets":"h2h,totals,btts,spreads","oddsFormat":"decimal","dateFormat":"iso","apiKey":THE_ODDS_API_KEY}  # sports parametresi kaldırıldı
     if not THE_ODDS_API_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
@@ -321,7 +324,7 @@ async def fetch_the_odds(session):
                 for it in data:
                     start = it.get("commence_time")
                     sport_key = it.get("sport_key", "Soccer")
-                    if not start or not within_time_range(start, 0, 48): continue # 48 saat sınırı
+                    if not start or not within_time_range(start, 0, 168): continue # Genişletildi
                     res.append({"id": it.get('id'),"home": it.get("home_team","Home"),"away": it.get("away_team","Away"),"start": start,"source": name,"live": False,"odds": it.get("bookmakers", []),"sport": sport_key})
             log.info(f"{name} raw:{len(data) if isinstance(data, list) else 0} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -331,10 +334,10 @@ async def fetch_the_odds(session):
 async def fetch_balldontlie(session):
     name = "BallDontLie"
     res = []
-    url = "https://www.balldontlie.io/api/v1/games" 
+    url = "https://api.balldontlie.io/api/v1/games"  # Düzeltilmiş URL
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
-    params = {"dates[]": [today, tomorrow]}
+    tomorrow = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")  # Genişletildi
+    params = {"start_date": today, "end_date": tomorrow}
     try:
         async with session.get(url, params=params, timeout=12) as r:
             if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
@@ -346,7 +349,7 @@ async def fetch_balldontlie(session):
                 is_live = start_status not in ("Pre Game", "Final") 
                 if start_status == "Final": continue
                 full_start = f"{match_date.split('T')[0]}T18:00:00Z" 
-                if not is_live and not within_time_range(full_start, 0, 48): continue # 48 saat sınırı
+                if not is_live and not within_time_range(full_start, 0, 168): continue # Genişletildi
                 res.append({"id": it.get('id'),"home": safe_get(it,"home_team","full_name") or "Home","away": safe_get(it,"visitor_team","full_name") or "Away","start": full_start,"source": name,"live": is_live,"odds": {},"sport": "basketball_nba"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -375,7 +378,7 @@ async def fetch_openligadb(session):
                 for it in items:
                     start = it.get("matchDateTimeUTC")
                     is_live = not it.get("matchIsFinished") and it.get("matchResults")
-                    if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 24)): continue
+                    if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 168)): continue # Genişletildi
                     res.append({"id": it.get('matchID'),"home": safe_get(it,"team1","teamName"),"away": safe_get(it,"team2","teamName"),"start": start,"source": name,"live": is_live,"odds": {},"sport": "Football (Bundesliga)"})
                 log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -386,8 +389,8 @@ async def fetch_sportsmonks(session):
     name = "SportsMonks"
     res = []
     start_date = NOW_UTC.strftime('%Y-%m-%d')
-    end_date = (NOW_UTC + timedelta(days=2)).strftime('%Y-%m-%d')
-    url = f"https://api.sportmonks.com/v3/football/fixtures/between/{start_date}/{end_date}"  # Düzeltilmiş endpoint: between dates
+    end_date = (NOW_UTC + timedelta(days=7)).strftime('%Y-%m-%d') # Genişletildi
+    url = f"https://api.sportmonks.com/v3/football/fixtures/between/{start_date}/{end_date}"  
     params = {"api_token": SPORTSMONKS_KEY, "include": "odds"}
     if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
@@ -398,7 +401,7 @@ async def fetch_sportsmonks(session):
             items = data.get("data") or []
             for it in items:
                 start = it.get("starting_at")
-                if not within_time_range(start, 0, 48): continue
+                if not within_time_range(start, 0, 168): continue
                 res.append({"id": it.get('id'),"home": it.get("home_team_name"),"away": it.get("away_team_name"),"start": start,"source": name,"live": False,"odds": it.get("odds", {}),"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -408,8 +411,8 @@ async def fetch_sportsmonks(session):
 async def fetch_footystats(session):
     name = "FootyStats"
     res = []
-    url = "https://api.football-data-api.com/league-matches"  # Düzeltilmiş endpoint: league-matches (genel upcoming için league_id ile)
-    params = {"key": FOOTYSTATS_KEY, "league_id": "1625"}  # EPL için test, Bundesliga ID'si için değiştirin (örneğin 2002 veya bulun)
+    url = "https://api.footystats.org/upcoming-matches"  # Orijinale döndürüldü
+    params = {"key": FOOTYSTATS_KEY}
     if not FOOTYSTATS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
@@ -419,7 +422,7 @@ async def fetch_footystats(session):
             items = data.get("data") or []
             for it in items:
                 start = it.get("match_start_iso") or it.get("start_date")
-                if it.get("status") != "upcoming" or not within_time_range(start, 0, 48): continue # 48 saate çıkarıldı
+                if it.get("status") != "upcoming" or not within_time_range(start, 0, 168): continue # Genişletildi
                 res.append({"id": it.get('id'),"home": it.get("home_name"),"away": it.get("away_name"),"start": start,"source": name,"live": False,"odds": {},"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -429,11 +432,11 @@ async def fetch_footystats(session):
 async def fetch_isports(session):
     name = "iSportsAPI"
     res = []
-    url = "https://api.isportsapi.com/sport/football/schedule"  # Düzeltilmiş endpoint: /sport/schedule/matches yerine /sport/football/schedule (dokümantasyona göre muhtemel düzeltme)
+    url = "https://api.isportsapi.com/sport/football/schedule"  
     params = {"api_key": ISPORTSAPI_KEY, "date": NOW_UTC.strftime("%Y-%m-%d")}
     if not ISPORTSAPI_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
-        async with session.get(url, params=params, timeout=12) as r:
+        async with session.get(url, params=params, timeout=12, ssl=False) as r:  # SSL ignore eklendi
             if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
             data = await r.json()
@@ -442,10 +445,9 @@ async def fetch_isports(session):
                 start = it.get("matchTime") 
                 match_status = it.get("matchStatus")
                 is_live = match_status != 0 and match_status != -1
-                if match_status == -1 or (not is_live and not within_time_range(start, 0, 24)): continue 
+                if match_status == -1 or (not is_live and not within_time_range(start, 0, 168)): continue # Genişletildi
                 res.append({"id": it.get('matchId'),"home": it.get("homeTeamName"),"away": it.get("awayTeamName"),"start": start,"source": name,"live": is_live,"odds": it.get("odds", {}),"sport": it.get("sportType", "Bilinmeyen")})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except ssl.SSLCertVerificationError as e: log.warning(f"{name} hata: SSL sertifika hatası (Geçici olarak atlanıyor)."); return res
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
     except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
@@ -465,7 +467,7 @@ async def fetch_ergast(session):
                 date = race.get("Date")
                 time = race.get("Time", "00:00:00Z")
                 start = f"{date}T{time}"
-                if not within_time_range(start, 0, 24): continue
+                if not within_time_range(start, 0, 168): continue # Genişletildi
                 res.append({"id": race.get('raceId'),"home": race_name,"away": race.get("Circuit", {}).get("circuitName"),"start": start,"source": name,"live": False,"odds": {},"sport": "Formula 1"})
             log.info(f"{name} raw:{len(race_table)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -476,8 +478,8 @@ async def fetch_nhl(session):
     name = "NHL Stats"
     res = []
     today = datetime.now(TR_TZ).strftime("%Y-%m-%d")
-    tomorrow = (datetime.now(TR_TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
-    url = f"https://statsapi.web.nhl.com/api/v1/schedule?startDate={today}&endDate={tomorrow}"
+    end_date = (datetime.now(TR_TZ) + timedelta(days=7)).strftime("%Y-%m-%d") # Genişletildi
+    url = f"https://statsapi.web.nhl.com/api/v1/schedule?startDate={today}&endDate={end_date}"
     try:
         async with session.get(url, timeout=12) as r:
             if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}"); return res
@@ -489,7 +491,7 @@ async def fetch_nhl(session):
                     start_time = game.get("gameDate")
                     status_detail = safe_get(game, "status", "detailedState")
                     is_live = status_detail not in ("Scheduled", "Pre-Game", "Final")
-                    if status_detail == "Final" or (not is_live and not within_time_range(start_time, 0, 24)): continue
+                    if status_detail == "Final" or (not is_live and not within_time_range(start_time, 0, 168)): continue # Genişletildi
                     home_team = safe_get(game, "teams", "home", "team", "name")
                     away_team = safe_get(game, "teams", "away", "team", "name")
                     res.append({"id": game_pk,"home": home_team,"away": away_team,"start": start_time,"source": name,"live": is_live,"odds": {},"sport": "Buz Hokeyi (NHL)"})
@@ -497,7 +499,6 @@ async def fetch_nhl(session):
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
     except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
-
 
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as session:
@@ -1132,8 +1133,8 @@ def main():
     if not TELEGRAM_CHAT_ID: log.critical("TELEGRAM_CHAT_ID ayarlı değil. Çıkılıyor."); sys.exit(1)
         
     app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("test", cmd_test))
     
+    app.add_handler(CommandHandler("test", cmd_test))
     async def post_init_callback(application: Application):
         asyncio.create_task(job_runner(application))
         log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
@@ -1153,6 +1154,3 @@ if __name__ == "__main__":
     try:
         cleanup_posted_matches()
         main() 
-        
-    except KeyboardInterrupt: log.info("Durduruldu.")
-    except Exception as e: log.critical(f"Kritik hata: {e}", exc_info=True); sys.exit(1)
