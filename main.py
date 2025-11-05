@@ -78,35 +78,40 @@ async def fetch_api_football(session):
 
 async def fetch_theodds(session):
     url = "https://api.the-odds-api.com/v4/sports/odds"
+    today = now_utc().strftime("%Y-%m-%d")
     params = {
         "apiKey": THE_ODDS_API_KEY,
-        "regions": "eu",
+        "regions": "eu,us,tr",
         "markets": "h2h,totals,btts",
         "oddsFormat": "decimal",
+        "date": today,
         "sport": "soccer"
     }
     try:
-        async with session.get(url, params=params, timeout=25) as r:
+        async with session.get(url, params=params, timeout=30) as r:
             if r.status != 200: return []
             data = await r.json()
             matches = []
             for game in data:
                 start = game.get("commence_time")
                 if not start or not in_range(start, -3, 72): continue
+                home = game.get("home_team")
+                away = game.get("away_team")
+                if not home or not away: continue
                 matches.append({
                     "id": f"odds_{game.get('id')}",
-                    "home": game.get("home_team"),
-                    "away": game.get("away_team"),
+                    "home": home,
+                    "away": away,
                     "start": start,
                     "live": False,
                     "odds": game.get("bookmakers", []),
                     "source": "TheOdds",
                     "league": game.get("sport_nice", "Futbol")
                 })
-            log.info(f"TheOdds: {len(matches)} maç")
+            log.info(f"TheOdds: {len(matches)} maç (eu+us+tr)")
             return matches
     except Exception as e:
-        log.error(f"TheOdds: {e}")
+        log.error(f"TheOdds hata: {e}")
         return []
 
 async def fetch_football_data(session):
