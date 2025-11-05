@@ -1,4 +1,4 @@
-# main.py — v62.9.3 (Maç Filtreleme ve Güçlendirilmiş API Çağrıları)
+# main.py — v62.9.4 (Düzeltilmiş API Çağrıları)
 
 import os
 import asyncio
@@ -18,7 +18,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.9.3") 
+log = logging.getLogger("v62.9.4") 
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -357,7 +357,7 @@ async def fetch_balldontlie(session):
 async def fetch_openligadb(session):
     name = "OpenLigaDB"
     res = []
-    url = "https://www.openligadb.de/api/getmatchdata/bl1/2025/1" 
+    url = "https://api.openligadb.de/getmatchdata/bl1/2025/1"  # Domain düzeltildi: www yerine api
     try:
         async with session.get(url, timeout=12) as r:
             if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
@@ -376,8 +376,10 @@ async def fetch_openligadb(session):
 async def fetch_sportsmonks(session):
     name = "SportsMonks"
     res = []
-    url = "https://api.sportmonks.com/v3/football/fixtures"
-    params = {"api_token": SPORTSMONKS_KEY, "include": "odds", "filter[starts_between]": f"{NOW_UTC.strftime('%Y-%m-%d')},{ (NOW_UTC + timedelta(days=2)).strftime('%Y-%m-%d')}"} # 48 saate çıkarıldı
+    start_date = NOW_UTC.strftime('%Y-%m-%d')
+    end_date = (NOW_UTC + timedelta(days=2)).strftime('%Y-%m-%d')
+    url = f"https://api.sportmonks.com/v3/football/fixtures/between/{start_date}/{end_date}"  # Düzeltilmiş endpoint: between dates
+    params = {"api_token": SPORTSMONKS_KEY, "include": "odds"}
     if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
         async with session.get(url, params=params, timeout=12) as r:
@@ -397,7 +399,7 @@ async def fetch_sportsmonks(session):
 async def fetch_footystats(session):
     name = "FootyStats"
     res = []
-    url = "https://api.footystats.org/league-matches"
+    url = "https://api.footystats.org/upcoming-matches"  # Düzeltilmiş endpoint: league-matches yerine upcoming-matches (genel için varsayım, dokümantasyona göre league-matches için league_id gerekiyor, genel için bu olabilir)
     params = {"key": FOOTYSTATS_KEY}
     if not FOOTYSTATS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
@@ -418,7 +420,7 @@ async def fetch_footystats(session):
 async def fetch_isports(session):
     name = "iSportsAPI"
     res = []
-    url = "https://api.isportsapi.com/sport/schedule/matches" 
+    url = "https://api.isportsapi.com/sport/football/schedule"  # Düzeltilmiş endpoint: /sport/schedule/matches yerine /sport/football/schedule (dokümantasyona göre muhtemel düzeltme)
     params = {"api_key": ISPORTSAPI_KEY, "date": NOW_UTC.strftime("%Y-%m-%d")}
     if not ISPORTSAPI_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
@@ -1129,7 +1131,7 @@ def main():
 
     app.post_init = post_init_callback
     
-    log.info("v62.9.3 (Güçlendirilmiş API) başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.9.4 (Düzeltilmiş API) başlatıldı. Telegram polling başlatılıyor...")
     
     try:
         app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
