@@ -1,4 +1,4 @@
-# bot.py - v63.4 - SON HALİ
+# bot.py - v63.5 - RAILWAY İÇİN ÖZEL
 import os
 import asyncio
 import logging
@@ -13,7 +13,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v63.4")
+log = logging.getLogger("STAKEZONE-AI v63.5")
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1001234567890")
@@ -43,7 +43,7 @@ def in_range(iso, min_h, max_h):
         return min_h <= (dt - now_utc()).total_seconds() / 3600 <= max_h
     except: return False
 
-# ---------------- API: API-FOOTBALL ----------------
+# ---------------- API'LER ----------------
 async def fetch_api_football(session):
     today = now_utc().strftime("%Y-%m-%d")
     url = "https://v3.football.api-sports.io/fixtures"
@@ -76,7 +76,6 @@ async def fetch_api_football(session):
         log.error(f"API-Football: {e}")
         return []
 
-# ---------------- API: THEODDS ----------------
 async def fetch_theodds(session):
     url = "https://api.the-odds-api.com/v4/sports/odds"
     params = {
@@ -110,7 +109,6 @@ async def fetch_theodds(session):
         log.error(f"TheOdds: {e}")
         return []
 
-# ---------------- API: FOOTBALL-DATA ----------------
 async def fetch_football_data(session):
     comps = ["PL", "BL1", "SA", "FL1", "PD"]
     today = now_utc().strftime("%Y-%m-%d")
@@ -141,7 +139,6 @@ async def fetch_football_data(session):
     log.info(f"Football-Data: {len(all_matches)} maç")
     return all_matches
 
-# ---------------- TÜM MAÇLAR ----------------
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as s:
         results = await asyncio.gather(
@@ -225,7 +222,7 @@ async def build_coupon(matches, title, max_n, min_conf, type_name):
 
 # ---------------- GÖREVLER ----------------
 async def job_runner(app):
-    await asyncio.sleep(10)
+    await asyncio.sleep(15)
     while True:
         try:
             matches = await fetch_all_matches()
@@ -261,11 +258,7 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append(f"• {m['home']} vs {m['away']} | {to_tr(m['start'])} | {m['source']}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
-# ---------------- ÇAKIŞMA ÖNLEYİCİ ----------------
-def handle_shutdown(app):
-    log.info("Bot durduruluyor...")
-    asyncio.create_task(app.stop())
-
+# ---------------- RAILWAY İÇİN ÇAKIŞMA ÖNLEYİCİ ----------------
 def main():
     if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
         log.critical("ENV EKSİK!")
@@ -279,20 +272,22 @@ def main():
 
     app.post_init = post_init
 
+    # HATA YÖNETİCİSİ
     async def error_handler(update, context):
         if isinstance(context.error, Conflict):
-            log.critical("ÇAKIŞMA! Başka bot çalışıyor. Kapanıyor...")
-            await app.stop()
-            os._exit(1)
+            log.critical("ÇAKIŞMA! Eski bot çalışıyor. 5 saniye sonra kapanıyor...")
+            await asyncio.sleep(5)
+            os._exit(1)  # ZORLA KAPAT
 
     app.add_error_handler(error_handler)
 
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: handle_shutdown(app))
-
-    log.info("STAKEZONE-AI v63.4 BAŞLADI")
-    app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+    log.info("STAKEZONE-AI v63.5 RAILWAY İÇİN BAŞLADI")
+    app.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+        timeout=30,
+        poll_interval=1.0
+    )
 
 if __name__ == "__main__":
     main()
