@@ -63,12 +63,13 @@ NBA_MIN_ODDS = 1.20
 NO_ODDS_MIN_CONFIDENCE = 80   
 
 # Dinamik Maç Başlama Saatleri (Saat cinsinden fark)
+# İSTEKLERİNİZ DOĞRULTUSUNDA GÜNCELLENMİŞTİR
 MATCH_TIME_HORIZON = {
-    "VIP": {"min": 0.5, "max": 24},   # 30 dakika - 24 saat arası
-    "DAILY": {"min": 6, "max": 48},   # 6 saat - 48 saat arası
-    "NBA": {"min": 0.5, "max": 24},   # 30 dakika - 24 saat arası (Tipik NBA programı)
-    "INSTANT": {"min": 0.5, "max": 24}, # 30 dakika - 24 saat arası
-    "LIVE": {"min": -1, "max": 0.5},   # Başlamış maçlar (-1 saatten 30 dakikaya kadar)
+    "VIP": {"min": 0, "max": 24},      # İSTEK: 0 saat - 24 saat arası
+    "DAILY": {"min": 0, "max": 24},    # İSTEK: 0 saat - 24 saat arası
+    "NBA": {"min": 0.5, "max": 24},    # 30 dakika - 24 saat arası (Mevcut korundu)
+    "INSTANT": {"min": 0, "max": 96},  # İSTEK: Tüm zamanlar (96 saate çıkarıldı)
+    "LIVE": {"min": -120, "max": 0.5}, # İSTEK: Geniş zaman, asıl filtre canlı durumudur.
     "TEST": {"min": 0.5, "max": 72},
 }
 
