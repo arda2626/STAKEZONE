@@ -1131,6 +1131,7 @@ async def job_runner(app: Application):
             
         await asyncio.sleep(60) # Her dakika kontrol et
 
+# /app/main.py, run_app fonksiyonu (YENİ VE KESİN DÜZELTME)
 async def run_app():
     if not TELEGRAM_TOKEN: log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor."); sys.exit(1)
     if not AI_KEY: log.error("AI_KEY ayarlı değil. Çıkılıyor."); sys.exit(1)
@@ -1139,33 +1140,39 @@ async def run_app():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     
     app.add_handler(CommandHandler("test", cmd_test))
-    async def post_init_callback(application: Application):
-        # post_init, initialize tamamlandıktan sonra çağrılır.
-        asyncio.create_task(job_runner(application))
-        log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
-
-    app.post_init = post_init_callback
     
+    # 1. Application'ı başlat (Bu, post_init callback'ini ve Job Runner'ı tetikler)
     log.info("v62.9.4 (Kritik Hatalar Giderildi) başlatılıyor.")
-    
+    await app.start()
+
+    # 2. Polling'i başlat
     log.info("Telegram polling başlatılıyor...")
-    
-    # ✅ KRİTİK DÜZELTME: stop_signals=None eklendi.
-    # Bu, 'event loop already running' ve 'Cannot close a running event loop' hatalarını önler.
-    await app.run_polling(
+    await app.updater.start_polling(
         allowed_updates=Update.ALL_TYPES, 
-        drop_pending_updates=True, 
-        stop_signals=None 
-    ) 
+        drop_pending_updates=True
+    )
+    
+    # 3. Sonsuz bekleme (Bot çalışırken ana döngünün kapanmasını engeller)
+    try:
+        # Bot çalışırken burası sonsuza kadar bekler
+        await asyncio.Future() 
+    except KeyboardInterrupt:
+        # Ctrl+C alındığında normal kapatma
+        pass
+    finally:
+        # 4. Uygulamayı ve Polling'i kapat
+        log.info("Uygulama kapatılıyor...")
+        await app.updater.stop()
+        await app.shutdown() 
+        log.info("Uygulama başarılı bir şekilde kapatıldı.")
+
 
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
         # Dış asyncio döngüsü
         asyncio.run(run_app())
-    except KeyboardInterrupt:
-        log.info("Durduruldu.")
     except Exception as e:
+        # KeyboardInterrupt run_app içinde yakalandığı için burada sadece diğer hatalar kalır.
         log.critical(f"Kritik hata: {e}", exc_info=True)
         sys.exit(1)
-
