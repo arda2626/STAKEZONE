@@ -11,14 +11,17 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 from aiohttp import ClientError
 from telegram import Update
+# telegram.ext içindeki gerekli sınıflar import ediliyor
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
+# Loglama ayarları
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.9.5") # Versiyon artırıldı
+log = logging.getLogger("v62.9.5") 
 
 # ENV KONTROLÜ
+# Bu anahtarların ortam değişkenlerinden geldiğini varsayıyoruz
 AI_KEY = os.getenv("AI_KEY", "").strip()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
@@ -43,10 +46,10 @@ LIVE_INTERVAL_HOURS = 1
 NBA_INTERVAL_HOURS = 24    
 
 # Yeni Anlık Analiz Ayarları
-INSTANT_ANALYSIS_INTERVAL_MINUTES = 20 # 20 dakikada bir kontrol
-INSTANT_ANALYSIS_MIN_CONFIDENCE = 65 # Minimum %65 kazanma ihtimali 
+INSTANT_ANALYSIS_INTERVAL_MINUTES = 20 
+INSTANT_ANALYSIS_MIN_CONFIDENCE = 65 
 INSTANT_ANALYSIS_MAX_ODDS = 10.0 
-INSTANT_ANALYSIS_COOLDOWN_MINUTES = 120 # Bir maç tekrar denenmeden önce bekleme süresi
+INSTANT_ANALYSIS_COOLDOWN_MINUTES = 120 
 
 LIVE_STAGGER_INTERVAL_MINUTES = 20 
 
@@ -324,14 +327,13 @@ async def fetch_the_odds(session):
                 for it in data:
                     start = it.get("commence_time")
                     sport_key = it.get("sport_key", "Soccer")
-                    if not start or not within_time_range(start, 0, 168): continue # Genişletildi
+                    if not start or not within_time_range(start, 0, 168): continue 
                     res.append({"id": it.get('id'),"home": it.get("home_team","Home"),"away": it.get("away_team","Away"),"start": start,"source": name,"live": False,"odds": it.get("bookmakers", []),"sport": sport_key})
             log.info(f"{name} raw:{len(data) if isinstance(data, list) else 0} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
     except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
-# ---------------- DÜZELTME 1: BallDontLie ----------------
 async def fetch_balldontlie(session):
     name = "BallDontLie"
     res = []
@@ -387,7 +389,7 @@ async def fetch_openligadb(session):
                 for it in items:
                     start = it.get("matchDateTimeUTC")
                     is_live = not it.get("matchIsFinished") and it.get("matchResults")
-                    if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 168)): continue # Genişletildi
+                    if it.get("matchIsFinished") or (not is_live and not within_time_range(start, 0, 168)): continue 
                     res.append({"id": it.get('matchID'),"home": safe_get(it,"team1","teamName"),"away": safe_get(it,"team2","teamName"),"start": start,"source": name,"live": is_live,"odds": {},"sport": "Football (Bundesliga)"})
                 log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -398,7 +400,7 @@ async def fetch_sportsmonks(session):
     name = "SportsMonks"
     res = []
     start_date = NOW_UTC.strftime('%Y-%m-%d')
-    end_date = (NOW_UTC + timedelta(days=7)).strftime('%Y-%m-%d') # Genişletildi
+    end_date = (NOW_UTC + timedelta(days=7)).strftime('%Y-%m-%d') 
     url = f"https://api.sportmonks.com/v3/football/fixtures/between/{start_date}/{end_date}"  
     params = {"api_token": SPORTSMONKS_KEY, "include": "odds"}
     if not SPORTSMONKS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
@@ -420,7 +422,7 @@ async def fetch_sportsmonks(session):
 async def fetch_footystats(session):
     name = "FootyStats"
     res = []
-    url = "https://api.footystats.org/upcoming-matches"  # Orijinale döndürüldü
+    url = "https://api.footystats.org/upcoming-matches" 
     params = {"key": FOOTYSTATS_KEY}
     if not FOOTYSTATS_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
@@ -431,7 +433,7 @@ async def fetch_footystats(session):
             items = data.get("data") or []
             for it in items:
                 start = it.get("match_start_iso") or it.get("start_date")
-                if it.get("status") != "upcoming" or not within_time_range(start, 0, 168): continue # Genişletildi
+                if it.get("status") != "upcoming" or not within_time_range(start, 0, 168): continue 
                 res.append({"id": it.get('id'),"home": it.get("home_name"),"away": it.get("away_name"),"start": start,"source": name,"live": False,"odds": {},"sport": "Football"})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -455,7 +457,7 @@ async def fetch_isports(session):
                 start = it.get("matchTime") 
                 match_status = it.get("matchStatus")
                 is_live = match_status != 0 and match_status != -1
-                if match_status == -1 or (not is_live and not within_time_range(start, 0, 168)): continue # Genişletildi
+                if match_status == -1 or (not is_live and not within_time_range(start, 0, 168)): continue 
                 res.append({"id": it.get('matchId'),"home": it.get("homeTeamName"),"away": it.get("awayTeamName"),"start": start,"source": name,"live": is_live,"odds": it.get("odds", {}),"sport": it.get("sportType", "Bilinmeyen")})
             log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
     except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
@@ -494,7 +496,7 @@ async def fetch_nhl(session):
     name = "NHL Stats"
     res = []
     today = datetime.now(TR_TZ).strftime("%Y-%m-%d")
-    end_date = (datetime.now(TR_TZ) + timedelta(days=7)).strftime("%Y-%m-%d") # Genişletildi
+    end_date = (datetime.now(TR_TZ) + timedelta(days=7)).strftime("%Y-%m-%d") 
     url = f"https://statsapi.web.nhl.com/api/v1/schedule?startDate={today}&endDate={end_date}"
     try:
         async with session.get(url, timeout=12) as r:
@@ -507,7 +509,7 @@ async def fetch_nhl(session):
                     start_time = game.get("gameDate")
                     status_detail = safe_get(game, "status", "detailedState")
                     is_live = status_detail not in ("Scheduled", "Pre-Game", "Final")
-                    if status_detail == "Final" or (not is_live and not within_time_range(start_time, 0, 168)): continue # Genişletildi
+                    if status_detail == "Final" or (not is_live and not within_time_range(start_time, 0, 168)): continue 
                     home_team = safe_get(game, "teams", "home", "team", "name")
                     away_team = safe_get(game, "teams", "away", "team", "name")
                     res.append({"id": game_pk,"home": home_team,"away": away_team,"start": start_time,"source": name,"live": is_live,"odds": {},"sport": "Buz Hokeyi (NHL)"})
@@ -870,7 +872,6 @@ async def run_instant_analysis_job(app: Application, all_matches: list):
     global last_run
     log.info(f"Anlık Analiz döngüsü başlatılıyor. (Min %{INSTANT_ANALYSIS_MIN_CONFIDENCE} güven aranıyor)")
     
-    # Dinamik filtreleme artık build_coupon_text içinde yapılıyor
     text = await build_coupon_text(
         all_matches, 
         "⚡ ANLIK AI ANALİZ (Continuity Bet)", 
@@ -892,7 +893,6 @@ async def run_nba_coupon_job(app: Application, all_matches: list):
     global last_run
     log.info(f"NBA kupon döngüsü başlatılıyor. (Min %{NBA_MIN_CONFIDENCE} güven, Min {NBA_MIN_ODDS} oran aranıyor)")
     
-    # Dinamik filtreleme artık build_coupon_text içinde yapılıyor
     text = await build_coupon_text(
         all_matches, 
         "🏀 NBA GOLDEN BET AI SEÇİMİ", 
@@ -1057,8 +1057,8 @@ async def initial_runs_scheduler(app: Application, all_matches):
 async def job_runner(app: Application):
     global last_run, ai_rate_limit
     
-    # İlk çalıştırma (Sadece bir kez)
-    await asyncio.sleep(5) # Telegram botu başlatılırken bekle
+    # İLK ÇALIŞTIRMA GECİKMESİ AZALTILDI
+    await asyncio.sleep(1) # Bot başlatılırken kısa bir bekleme
     matches = await fetch_all_matches() # İlk maçları çek
     await initial_runs_scheduler(app, matches)
 
@@ -1135,7 +1135,7 @@ async def job_runner(app: Application):
             log.exception(f"Job runner hatası: {e}")
         await asyncio.sleep(60)
 
-# ---------------- run_app (Ana Başlatıcı - DÖNGÜ HATASI GİDERİLDİ) ----------------
+# ---------------- run_app (Ana Başlatıcı - GÜNCEL VE STABİL) ----------------
 async def run_app():
     if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
         log.critical("Gerekli ENV değişkenleri eksik!")
@@ -1144,44 +1144,37 @@ async def run_app():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
     
-    # 🌟 KRİTİK DÜZELTME: Application.initialize() EKLENDİ
+    # KRİTİK DÜZELTME: initialize çağrısı
     log.info("Uygulama dahili olarak başlatılıyor (initialize)...")
     await app.initialize()
 
     async def post_init_callback(application: Application):
-        # post_init, Application.start() çağrıldıktan sonra, yani bot hazır olduğunda tetiklenir.
-        log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
+        # post_init, run_polling çağrıldıktan hemen sonra event loop içinde tetiklenir.
+        log.info("Job runner başarıyla asenkron görev olarak başlatılıyor.")
         asyncio.create_task(job_runner(application))
 
     app.post_init = post_init_callback
 
-    # 1. Uygulamanın başlatılması (Handler'ları, Job'ları hazırlar ve post_init'i çağırır)
-    log.info("v62.9.5 başlatılıyor (start)...")
-    await app.start()
-
-    # 2. Polling'in başlatılması (Güncellemeleri çekmeye başlar)
-    log.info("Telegram polling başlatılıyor...")
-    await app.updater.start_polling(drop_pending_updates=True)
-    
-    # 3. Sonsuz bekleme (Bot çalışırken ana döngünün kapanmasını engeller)
+    # run_polling, hem start() hem de polling'i başlatır ve ana döngüyü yönetir.
+    log.info("v62.9.5 başlatılıyor (run_polling)...")
     try:
-        # Bot çalışırken burası sonsuza kadar bekler
-        await asyncio.Future() 
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        # Ctrl+C veya döngü iptali alındığında
-        pass
+        # run_polling() uygulamayı başlatır ve döngüde tutar.
+        await app.run_polling(drop_pending_updates=True, close_loop=False) 
+    except Exception as e:
+        log.critical(f"Ana döngü hatası: {e}", exc_info=True)
     finally:
-        # 4. Uygulamayı ve Polling'i kapat
-        log.info("Uygulama kapatılıyor...")
-        await app.updater.stop()
-        await app.shutdown() 
+        # run_polling kapandığında burası tetiklenir
         log.info("Uygulama başarılı bir şekilde kapatıldı.")
 
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
-        # Dış asyncio döngüsü
+        # run_app() artık tüm asenkron yönetimi yapıyor.
         asyncio.run(run_app())
+    except KeyboardInterrupt:
+        # Ctrl+C ile kapatılma
+        log.info("Kullanıcı tarafından kesme (KeyboardInterrupt) alındı. Bot kapatılıyor.")
+        sys.exit(0)
     except Exception as e:
         log.critical(f"Kritik hata: {e}", exc_info=True)
         sys.exit(1)
