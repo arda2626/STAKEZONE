@@ -22,6 +22,7 @@ AI_KEY = os.getenv("AI_KEY", "sk-...")
 API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2"
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771"
 FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7"
+SPORT_RADAR_KEY = "6905f97d5be685aa3139c63e" # YENİ ANAHTAR EKLENDİ!
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 MODEL = "gpt-4o"
@@ -40,10 +41,14 @@ def to_tr(iso):
 def in_range(iso, min_h, max_h):
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        # Sportradar API'sinden gelen tarih formatı farklı olabilir, Z olmadan da deneyelim
+        if not dt.tzinfo:
+             dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
         return min_h <= (dt - now_utc()).total_seconds() / 3600 <= max_h
     except: return False
 
-# ---------------- API'LER (AYNI) ----------------
+# ---------------- API'LER (GÜNCELLENMİŞ) ----------------
+
 async def fetch_api_football(session):
     today = now_utc().strftime("%Y-%m-%d")
     url = "https://v3.football.api-sports.io/fixtures"
@@ -144,12 +149,69 @@ async def fetch_football_data(session):
     log.info(f"Football-Data: {len(all_matches)} maç")
     return all_matches
 
+
+async def fetch_sportradar(session):
+    # Sportradar Trial Live Matches URL'i
+    url = "https://api.sportradar.com/soccer/trial/v4/en/schedules/live_matches.json"
+    params = {"api_key": SPORT_RADAR_KEY} 
+    
+    matches = []
+    try:
+        async with session.get(url, params=params, timeout=20) as r:
+            if r.status != 200: 
+                log.warning(f"Sportradar Hata: {r.status} - {await r.text()}")
+                return []
+            data = await r.json()
+            
+            # Sportradar JSON yapısı: Çoğu zaman "sport_events" anahtarındadır.
+            sport_events = data.get("sport_events", [])
+            # Yedek: Eğer "schedule" altında gelirse (bazı API'lerde değişebilir):
+            if not sport_events:
+                 sport_events = data.get("schedule", {}).get("sport_events", [])
+
+            for match in sport_events:
+                start = match.get("start_time") # Örn: 2024-05-19T13:00:00+00:00
+                if not start or not in_range(start, -3, 72): continue
+                
+                competitors = match.get("competitors", [])
+                if len(competitors) < 2: continue # Yeterli takım yoksa atla
+                
+                # Takım isimlerini daha güvenli çekme:
+                home_team = competitors[0].get("name")
+                away_team = competitors[1].get("name")
+                
+                if not home_team or not away_team: continue
+                
+                # Sportradar statüleri: "live", "half_time", "in_play" vb.
+                live_status = match.get("status") in ["live", "half_time", "in_play"]
+
+                # Lig adını "tournament" altından al:
+                tournament_name = match.get("tournament", {}).get("name")
+                
+                matches.append({
+                    "id": f"sr_{match.get('id')}",
+                    "home": home_team,
+                    "away": away_team,
+                    "start": start,
+                    "live": live_status,
+                    "odds": [], 
+                    "source": "Sportradar",
+                    "league": tournament_name or "Sportradar Futbol Ligi"
+                })
+
+            log.info(f"Sportradar: {len(matches)} maç (Trial)")
+            return matches
+    except Exception as e:
+        log.error(f"Sportradar hata: {e}")
+        return []
+
 async def fetch_all_matches():
     async with aiohttp.ClientSession() as s:
         results = await asyncio.gather(
             fetch_api_football(s),
             fetch_theodds(s),
             fetch_football_data(s),
+            fetch_sportradar(s), # SPORT RADAR EKLEDİK
             return_exceptions=True
         )
     all_matches = [m for res in results if isinstance(res, list) for m in res]
@@ -220,7 +282,7 @@ async def build_coupon(matches, title, max_n, min_conf, type_name):
             f"   Oran: <b>{odd or 'Yok'}</b>\n"
             f"   <i>{pred['explanation']}</i>"
         )
-        posted_matches[mid] = now
+        posted_matches[str(m["id"])] = now
     return f"{title}\n{'─' * 32}\n" + "\n\n".join(lines) + f"\n{'─' * 32}\n<i>Sorumluluk size aittir.</i>"
 
 # ---------------- GÖREVLER ----------------
@@ -257,8 +319,8 @@ async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Maç yok. API anahtarlarını kontrol et.")
         return
     lines = [f"<b>{len(matches)} MAÇ BULUNDU</b>"]
-    for m in matches[:3]:
-        lines.append(f"• {m['home']} vs {m['away']} | {to_tr(m['start'])} | {m['source']}")
+    for m in matches[:5]:
+        lines.append(f"• {m['home']} vs {m['away']} | {to_tr(m['start'])} | Kaynak: {m['source']}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 # ---------------- ZOMBİ ÖLDÜRÜCÜ ----------------
