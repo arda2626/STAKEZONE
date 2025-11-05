@@ -621,7 +621,7 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
     payload = {
         "model": MODEL,
         "messages":[
-            {"role":"system","content":f"Sen Türkçe konuşan, yüksek güvenilirlikte tahminler yapan, bir spor yorumcusu ve kumarbaz zekasına sahip profesyonel bir analistsin. Piyasa hareketlerini, risk ve ödülü değerlendir. Tüm popüler marketler ({market_list}) için en güçlü 1 veya 2 veya KG VAR/YOK veya 2.5 ÜST/ALT tahminini yap. Tahminlerinin 70'ten (VIP/CANLI/NBA için 85'ten, Oransız maçlar için min 80'den) düşük olmamasına özen göster. Cevabı sadece belirtilen JSON formatında ver. Başka hiçbir açıklayıcı metin kullanma. Confidence 0-100 arasında tam sayı olmalı. Alt/Üst tahminlerini 'Under 2.5' veya 'Over 3.5' formatında yap. Oyuncu prop tahminlerini 'Oyuncu: LeBron James, Tercih: Over 25.5 Sayı' formatında yap."},
+            {"role":"system","content":f"Sen Türkçe konuşan, yüksek güvenirlilikte tahminler yapan, bir spor yorumcusu ve kumarbaz zekasına sahip profesyonel bir analistsin. Piyasa hareketlerini, risk ve ödülü değerlendir. Tüm popüler marketler ({market_list}) için en güçlü 1 veya 2 veya KG VAR/YOK veya 2.5 ÜST/ALT tahminini yap. Tahminlerinin 70'ten (VIP/CANLI/NBA için 85'ten, Oransız maçlar için min 80'den) düşük olmamasına özen göster. Cevabı sadece belirtilen JSON formatında ver. Başka hiçbir açıklayıcı metin kullanma. Confidence 0-100 arasında tam sayı olmalı. Alt/Üst tahminlerini 'Under 2.5' veya 'Over 3.5' formatında yap. Oyuncu prop tahminlerini 'Oyuncu: LeBron James, Tercih: Over 25.5 Sayı' formatında yap."},
             {"role":"user","content": prompt}
         ],
         "temperature": temperature,
@@ -1003,6 +1003,7 @@ async def initial_runs_scheduler(app: Application, all_matches):
     """Bot başlatıldıktan sonra istenen ilk kuponları belirli sürelerde gönderir."""
     
     global last_run
+    log.info("İlk kupon yayınları zamanlanıyor...")
     
     # --- 1. LIVE COUPON (Anında) ---
     await asyncio.sleep(5)
@@ -1052,11 +1053,14 @@ async def initial_runs_scheduler(app: Application, all_matches):
     log.info("İlk çalıştırma tamamlandı. Periyodik döngüye geçiliyor.")
 
 
-# ---------------- DÜZELTME 4: job_runner ----------------
+# ---------------- job_runner (Periyodik Görevler) ----------------
 async def job_runner(app: Application):
     global last_run, ai_rate_limit
-    await asyncio.sleep(10)
-    initial_done = False
+    
+    # İlk çalıştırma (Sadece bir kez)
+    await asyncio.sleep(5) # Telegram botu başlatılırken bekle
+    matches = await fetch_all_matches() # İlk maçları çek
+    await initial_runs_scheduler(app, matches)
 
     while True:
         try:
@@ -1068,27 +1072,15 @@ async def job_runner(app: Application):
                 ai_rate_limit["calls"] = 0
                 ai_rate_limit["reset"] = now + timedelta(minutes=1)
 
-            matches = await fetch_all_matches()
-
-            if not initial_done:
-                await initial_runs_scheduler(app, matches)
-                initial_done = True
-            
-            # --- İLK ÇALIŞTIRMA BLOĞU ---
-            if not initial_run_done:
-                log.info("İlk kupon yayınları zamanlandı.")
-                # İlk çalıştırmada job_runner asenkron bir görev olarak başlatıldığı için,
-                # initial_runs_scheduler'ı çağırdığımızda, görevler zamanlanacaktır.
-                await initial_runs_scheduler(app, all_matches)
-                initial_run_done = True
-            
+            # Her döngüde yeni maçları çek
+            matches = await fetch_all_matches() 
             
             # --- PERİYODİK DÖNGÜLER ---
             
             # --- LIVE (1 saatlik) ---
             lr_live = last_run.get("LIVE")
             if lr_live and (now - lr_live).total_seconds() >= LIVE_INTERVAL_HOURS*3600:
-                await run_live_coupon_job(app, all_matches)
+                await run_live_coupon_job(app, matches)
             
             # --- DAILY (12 saatlik) ---
             lr_daily = last_run.get("DAILY")
@@ -1096,7 +1088,7 @@ async def job_runner(app: Application):
                 log.info("Günlük yayın döngüsü başladı.")
                 
                 text = await build_coupon_text(
-                    all_matches, 
+                    matches, 
                     "✅ GÜNLÜK GARANTİ AI SEÇİMİ", 
                     max_matches=DAILY_MAX_MATCHES,
                     coupon_type="DAILY"
@@ -1112,7 +1104,7 @@ async def job_runner(app: Application):
                 log.info("VIP yayın döngüsü başladı.")
                 
                 text = await build_coupon_text(
-                    all_matches, 
+                    matches, 
                     "👑 VIP AI SÜRPRİZ KUPON", 
                     max_matches=VIP_MAX_MATCHES,
                     coupon_type="VIP"
@@ -1125,7 +1117,7 @@ async def job_runner(app: Application):
             # --- NBA (24 saatlik) ---
             lr_nba = last_run.get("NBA")
             if lr_nba and (now - lr_nba).total_seconds() >= NBA_INTERVAL_HOURS*3600:
-                await run_nba_coupon_job(app, all_matches)
+                await run_nba_coupon_job(app, matches)
             
             # --- INSTANT ANALYSIS (20 dakikada bir kontrol) ---
             lr_instant = last_run.get("INSTANT")
@@ -1137,12 +1129,13 @@ async def job_runner(app: Application):
             
             if is_gap and is_instant_due:
                 log.info("Boşluk algılandı. Anlık Analiz döngüsü başlatılıyor.")
-                await run_instant_analysis_job(app, all_matches)
+                await run_instant_analysis_job(app, matches)
                         
         except Exception as e:
             log.exception(f"Job runner hatası: {e}")
         await asyncio.sleep(60)
 
+# ---------------- run_app (Ana Başlatıcı - DÖNGÜ HATASI GİDERİLDİ) ----------------
 async def run_app():
     if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
         log.critical("Gerekli ENV değişkenleri eksik!")
@@ -1150,19 +1143,28 @@ async def run_app():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
+    
+    async def post_init_callback(application: Application):
+        # post_init, Application.start() çağrıldıktan sonra, yani bot hazır olduğunda tetiklenir.
+        log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
+        asyncio.create_task(job_runner(application))
 
-    # Job Runner'ı başlat
-    asyncio.create_task(job_runner(app))
+    app.post_init = post_init_callback
 
-    log.info("Bot polling ile başlatılıyor...")
-    await app.run_polling(drop_pending_updates=True)
+    # 1. Uygulamanın başlatılması (Handler'ları, Job'ları hazırlar ve post_init'i çağırır)
+    log.info("v62.9.4 başlatılıyor...")
+    await app.start()
+
+    # 2. Polling'in başlatılması (Güncellemeleri çekmeye başlar)
+    log.info("Telegram polling başlatılıyor...")
+    await app.updater.start_polling(drop_pending_updates=True)
     
     # 3. Sonsuz bekleme (Bot çalışırken ana döngünün kapanmasını engeller)
     try:
         # Bot çalışırken burası sonsuza kadar bekler
         await asyncio.Future() 
-    except KeyboardInterrupt:
-        # Ctrl+C alındığında normal kapatma
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # Ctrl+C veya döngü iptali alındığında
         pass
     finally:
         # 4. Uygulamayı ve Polling'i kapat
@@ -1171,13 +1173,11 @@ async def run_app():
         await app.shutdown() 
         log.info("Uygulama başarılı bir şekilde kapatıldı.")
 
-
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
         # Dış asyncio döngüsü
         asyncio.run(run_app())
     except Exception as e:
-        # KeyboardInterrupt run_app içinde yakalandığı için burada sadece diğer hatalar kalır.
         log.critical(f"Kritik hata: {e}", exc_info=True)
         sys.exit(1)
