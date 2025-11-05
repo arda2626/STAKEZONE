@@ -1,4 +1,4 @@
-# bot.py - v63.6 - RAILWAY ZOMBİ ÖLDÜRÜCÜ
+# bot.py - v64.0 - API Anahtarları Güncellendi ve Sportradar Düzeltmesi Eklendi
 import os
 import asyncio
 import logging
@@ -13,16 +13,20 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("STAKEZONE-AI v63.6")
+log = logging.getLogger("STAKEZONE-AI v64.0")
 
+# Telegram ve AI anahtarları ENV'den çekilir veya buradaki yedek kullanılır
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8393964009:AAE6BnaKNqYLk3KahAL2k9ABOkdL7eFIb7s")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1001234567890")
 AI_KEY = os.getenv("AI_KEY", "sk-...")
 
-API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2"
-THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771"
-FOOTBALL_DATA_KEY = "80a354c67b694ef79c516182ad64aed7"
-SPORT_RADAR_KEY = "DtjUopc5eVZYlSW5AgMiE9ykr6hKP2t1YqxFPTor" # YENİ ANAHTAR EKLENDİ!
+# --- API Anahtarları (Sizin Tarafınızdan Sağlanan/Kullanılan Değerler) ---
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY", "e35c566553ae8a89972f76ab04c16bd2")
+THE_ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY", "0180c1cbedb086bdcd526bc0464ee771")
+FOOTBALL_DATA_KEY = os.getenv("FOOTBALL_DATA_KEY", "80a354c67b694ef79c516182ad64aed7")
+# YENİ SPORT RADAR ANAHTARI BURAYA GÜNCELLENDİ
+SPORT_RADAR_KEY = os.getenv("SPORT_RADAR_KEY", "DtjUopc5eVZYlSW5AgMiE9ykr6hKP2t1YqxFPTor") 
+# ------------------------------------------------------------------------
 
 OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 MODEL = "gpt-4o"
@@ -40,20 +44,26 @@ def to_tr(iso):
     except: return "?"
 def in_range(iso, min_h, max_h):
     try:
+        # ISO formatını işleme
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
-        # Sportradar API'sinden gelen tarih formatı farklı olabilir, Z olmadan da deneyelim
         if not dt.tzinfo:
+             # Eğer zaman dilimi yoksa UTC olduğunu varsay
              dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
         return min_h <= (dt - now_utc()).total_seconds() / 3600 <= max_h
     except: return False
 
-# ---------------- API'LER (GÜNCELLENMİŞ) ----------------
+# ---------------- API'LER ----------------
 
 async def fetch_api_football(session):
+    # Bugün ve yarın arasındaki maçları çekmek için tarih aralığı kullanıldı.
     today = now_utc().strftime("%Y-%m-%d")
+    tomorrow = (now_utc() + timedelta(days=1)).strftime("%Y-%m-%d")
     url = "https://v3.football.api-sports.io/fixtures"
     headers = {"x-apisports-key": API_FOOTBALL_KEY}
-    params = {"date": today, "timezone": "Europe/Istanbul"}
+    
+    # Tarih aralığını kullan
+    params = {"from": today, "to": tomorrow, "timezone": "Europe/Istanbul"} 
+    
     try:
         async with session.get(url, params=params, headers=headers, timeout=25) as r:
             if r.status != 200: 
@@ -64,7 +74,8 @@ async def fetch_api_football(session):
             for f in data.get("response", []):
                 fix = f.get("fixture", {})
                 start = fix.get("date")
-                if not start or not in_range(start, -3, 72): continue
+                # 3 saat öncesi ve 72 saat sonrası aralığı kontrol edilir
+                if not start or not in_range(start, -3, 72): continue 
                 teams = f.get("teams", {})
                 league = f.get("league", {}).get("name", "Lig")
                 matches.append({
@@ -153,9 +164,8 @@ async def fetch_football_data(session):
 
 
 async def fetch_sportradar(session):
-    # Sportradar Trial GÜN TAKVİMİ URL'i (404 hatasını önlemek için canlı maç yerine)
-    today = now_utc().strftime("%Y-%m-%d")
-    url = f"https://api.sportradar.com/soccer/trial/v4/en/schedules/{today}/schedule.json"
+    # Sportradar Trial Live Matches URL'i tekrar denendi (Yeni anahtar ile 403/404 kontrolü)
+    url = "https://api.sportradar.com/soccer/trial/v4/en/schedules/live_matches.json"
     params = {"api_key": SPORT_RADAR_KEY} 
     
     matches = []
@@ -166,6 +176,7 @@ async def fetch_sportradar(session):
                 return []
             data = await r.json()
             
+            # JSON yapısı kontrolü: "sport_events" veya "schedule" altından çekme
             sport_events = data.get("sport_events", [])
             if not sport_events:
                  sport_events = data.get("schedule", {}).get("sport_events", [])
@@ -343,7 +354,7 @@ def main():
 
     app.add_error_handler(error_handler)
 
-    log.info("STAKEZONE-AI v63.6 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
+    log.info("STAKEZONE-AI v64.0 ZOMBİ ÖLDÜRÜCÜ BAŞLADI")
     
     # RAILWAY İÇİN ÖZEL POLLING
     app.run_polling(
