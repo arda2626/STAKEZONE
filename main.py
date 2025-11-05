@@ -26,7 +26,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # API keyler
 API_FOOTBALL_KEY = "e35c566553ae8a89972f76ab04c16bd2" 
 THE_ODDS_API_KEY = "0180c1cbedb086bdcd526bc0464ee771" 
-SPORTSMONKS_KEY = "AirVTC8HLItQs55iaPnxp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrHED7FJ"
+SPORTSMONKS_KEY = "AirVTC8HLItQs55iaPnxp9TnZ45fdQiK6ecvFFgNavnHSIQxabupFbTrhED7FJ"
 ISPORTSAPI_KEY = "7MAJu58UDAlMdWrw" 
 FOOTYSTATS_KEY = "test85g57" 
 OPENLIGADB_KEY = os.getenv("OPENLIGADB_KEY", "").strip()
@@ -1148,16 +1148,16 @@ async def run_app():
     
     log.info("v62.9.4 (Kritik Hatalar Giderildi) başlatılıyor.")
     
-    # DÜZELTİLDİ: initialize çağrısı kaldırıldı. app.run_polling, initialize ve start işlemlerini kendisi yönetecektir.
-    # await app.initialize() <--- KALDIRILDI!
-    
     log.info("Telegram polling başlatılıyor...")
     
-    await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True) 
+    # ✅ KRİTİK DÜZELTME: run_polling yerine run_for_one_of_many kullanıldı
+    # Bu metot, harici asyncio.run() ile çakışmayı önler.
+    await app.run_for_one_of_many(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True) 
 
 if __name__ == "__main__":
     try:
         cleanup_posted_matches()
+        # Dış asyncio döngüsü
         asyncio.run(run_app())
     except KeyboardInterrupt:
         log.info("Durduruldu.")
