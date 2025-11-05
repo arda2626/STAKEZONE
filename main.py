@@ -16,7 +16,7 @@ from telegram.error import Conflict
 
 # ---------------- CONFIG ----------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-log = logging.getLogger("v62.9.4") 
+log = logging.getLogger("v62.9.5") # Versiyon artırıldı
 
 # ENV KONTROLÜ
 AI_KEY = os.getenv("AI_KEY", "").strip()
@@ -44,7 +44,7 @@ NBA_INTERVAL_HOURS = 24
 
 # Yeni Anlık Analiz Ayarları
 INSTANT_ANALYSIS_INTERVAL_MINUTES = 20 # 20 dakikada bir kontrol
-INSTANT_ANALYSIS_MIN_CONFIDENCE = 65 # Minimum %65 kazanma ihtimali (DÜZELTİLDİ: 75'ten 65'e düşürüldü)
+INSTANT_ANALYSIS_MIN_CONFIDENCE = 65 # Minimum %65 kazanma ihtimali 
 INSTANT_ANALYSIS_MAX_ODDS = 10.0 
 INSTANT_ANALYSIS_COOLDOWN_MINUTES = 120 # Bir maç tekrar denenmeden önce bekleme süresi
 
@@ -64,9 +64,9 @@ NO_ODDS_MIN_CONFIDENCE = 80
 
 # Dinamik Maç Başlama Saatleri (Saat cinsinden fark)
 MATCH_TIME_HORIZON = {
-    "VIP": {"min": 0.5, "max": 168},   # Genişletildi
-    "DAILY": {"min": 6, "max": 168},   # Genişletildi
-    "NBA": {"min": 0.5, "max": 168},   # Genişletildi
+    "VIP": {"min": 0.5, "max": 168},   
+    "DAILY": {"min": 6, "max": 168},   
+    "NBA": {"min": 0.5, "max": 168},   
     "INSTANT": {"min": 0.5, "max": 168},
     "LIVE": {"min": -1, "max": 0.5},  
     "TEST": {"min": 0.5, "max": 168},
@@ -1144,6 +1144,10 @@ async def run_app():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("test", cmd_test))
     
+    # 🌟 KRİTİK DÜZELTME: Application.initialize() EKLENDİ
+    log.info("Uygulama dahili olarak başlatılıyor (initialize)...")
+    await app.initialize()
+
     async def post_init_callback(application: Application):
         # post_init, Application.start() çağrıldıktan sonra, yani bot hazır olduğunda tetiklenir.
         log.info("Job runner başarıyla asenkron görev olarak başlatıldı.")
@@ -1152,7 +1156,7 @@ async def run_app():
     app.post_init = post_init_callback
 
     # 1. Uygulamanın başlatılması (Handler'ları, Job'ları hazırlar ve post_init'i çağırır)
-    log.info("v62.9.4 başlatılıyor...")
+    log.info("v62.9.5 başlatılıyor (start)...")
     await app.start()
 
     # 2. Polling'in başlatılması (Güncellemeleri çekmeye başlar)
