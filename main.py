@@ -1,4 +1,4 @@
-import os
+Import os
 import asyncio
 import logging
 import json
@@ -44,7 +44,7 @@ NBA_INTERVAL_HOURS = 24
 
 # Yeni Anlık Analiz Ayarları
 INSTANT_ANALYSIS_INTERVAL_MINUTES = 20 # 20 dakikada bir kontrol
-INSTANT_ANALYSIS_MIN_CONFIDENCE = 75 # Minimum %75 kazanma ihtimali
+INSTANT_ANALYSIS_MIN_CONFIDENCE = 65 # Minimum %65 kazanma ihtimali (DÜZELTİLDİ: 75'ten 65'e düşürüldü)
 INSTANT_ANALYSIS_MAX_ODDS = 10.0 
 INSTANT_ANALYSIS_COOLDOWN_MINUTES = 120 # Bir maç tekrar denenmeden önce bekleme süresi
 
@@ -436,7 +436,8 @@ async def fetch_isports(session):
     params = {"api_key": ISPORTSAPI_KEY, "date": NOW_UTC.strftime("%Y-%m-%d")}
     if not ISPORTSAPI_KEY: log.info(f"{name} Key eksik, atlanıyor."); return res
     try:
-        async with session.get(url, params=params, timeout=12, ssl=False) as r:  # SSL ignore eklendi
+        # SSL ignore eklendi
+        async with session.get(url, params=params, timeout=12, ssl=False) as r: 
             if r.status == 429 or r.status == 403: log.error(f"{name} HATA: Limit/Erişim sorunu ({r.status})."); return res
             elif r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
             data = await r.json()
@@ -501,7 +502,8 @@ async def fetch_nhl(session):
     return res
 
 async def fetch_all_matches():
-    async with aiohttp.ClientSession() as session:
+    # DÜZELTİLDİ: SSL doğrulamasını atlamak için connector eklendi (API bağlantı sorununu çözmek için)
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as session:
         tasks = [
             fetch_football_data(session), 
             fetch_api_football(session), 
@@ -1141,12 +1143,13 @@ async def run_app():
 
     app.post_init = post_init_callback
     
-    log.info("v62.9.4 (Düzeltilmiş API) başlatıldı. Telegram polling başlatılıyor...")
+    log.info("v62.9.4 (Kritik Hatalar Giderildi) başlatılıyor.")
     
     await app.initialize()
-    await app.start()
-    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-    await app.updater.idle()
+    
+    log.info("Telegram polling başlatılıyor...")
+    # DÜZELTİLDİ: app.updater.idle() yerine modern app.run_polling() kullanıldı.
+    await app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True) 
 
 if __name__ == "__main__":
     try:
