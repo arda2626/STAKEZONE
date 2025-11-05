@@ -331,29 +331,38 @@ async def fetch_the_odds(session):
     except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
     return res
 
+# ---------------- DÜZELTME 1: BallDontLie ----------------
 async def fetch_balldontlie(session):
     name = "BallDontLie"
     res = []
-    url = "https://api.balldontlie.io/api/v1/games"  # Düzeltilmiş URL
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    tomorrow = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")  # Genişletildi
-    params = {"start_date": today, "end_date": tomorrow}
+    url = "https://www.balldontlie.io/api/v1/games"
+    params = {"season": "2025", "per_page": 100}
     try:
         async with session.get(url, params=params, timeout=12) as r:
-            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status} (Kısıtlı)."); return res
+            if r.status != 200:
+                log.warning(f"{name} HTTP HATA: {r.status}")
+                return res
             data = await r.json()
             items = data.get("data") or []
             for it in items:
-                start_status = it.get("status")
-                match_date = it.get("date")
-                is_live = start_status not in ("Pre Game", "Final") 
-                if start_status == "Final": continue
-                full_start = f"{match_date.split('T')[0]}T18:00:00Z" 
-                if not is_live and not within_time_range(full_start, 0, 168): continue # Genişletildi
-                res.append({"id": it.get('id'),"home": safe_get(it,"home_team","full_name") or "Home","away": safe_get(it,"visitor_team","full_name") or "Away","start": full_start,"source": name,"live": is_live,"odds": {},"sport": "basketball_nba"})
-            log.info(f"{name} raw:{len(items)} filtered:{len(res)}")
-    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
-    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
+                status = it.get("status")
+                if status == "Final": continue
+                date_str = it.get("date", "").split("T")[0]
+                full_start = f"{date_str}T18:00:00Z"
+                if not within_time_range(full_start, 0, 168): continue
+                res.append({
+                    "id": it.get("id"),
+                    "home": safe_get(it, "home_team", "full_name"),
+                    "away": safe_get(it, "visitor_team", "full_name"),
+                    "start": full_start,
+                    "source": name,
+                    "live": status in ("1st", "2nd", "3rd", "4th", "Halftime"),
+                    "odds": {},
+                    "sport": "basketball_nba"
+                })
+            log.info(f"{name} filtered: {len(res)}")
+    except Exception as e:
+        log.warning(f"{name} hata: {e}")
     return res
 
 async def fetch_openligadb(session):
@@ -456,23 +465,29 @@ async def fetch_isports(session):
 async def fetch_ergast(session):
     name = "Ergast (F1)"
     res = []
-    url = "http://ergast.com/api/f1/current/next.json" 
+    url = "http://ergast.com/api/f1/current/next.json"
     try:
         async with session.get(url, timeout=12) as r:
-            if r.status != 200: log.warning(f"{name} HTTP HATA: {r.status}"); return res
+            if r.status != 200: return res
             data = await r.json()
-            race_table = safe_get(data, "MRData", "RaceTable", "Races")
-            if not race_table: return res
-            for race in race_table:
-                race_name = race.get("raceName")
-                date = race.get("Date")
-                time = race.get("Time", "00:00:00Z")
-                start = f"{date}T{time}"
-                if not within_time_range(start, 0, 168): continue # Genişletildi
-                res.append({"id": race.get('raceId'),"home": race_name,"away": race.get("Circuit", {}).get("circuitName"),"start": start,"source": name,"live": False,"odds": {},"sport": "Formula 1"})
-            log.info(f"{name} raw:{len(race_table)} filtered:{len(res)}")
-    except aiohttp.ClientError as e: log.warning(f"{name} Aiohttp hata: {e}"); return res
-    except Exception as e: log.warning(f"{name} genel hata: {e}"); return res
+            races = safe_get(data, "MRData", "RaceTable", "Races") or []
+            for race in races:
+                date = race.get("date")
+                time = race.get("time", "00:00:00Z").replace("Z", "")
+                start = f"{date}T{time}Z"
+                if not within_time_range(start, 0, 168): continue
+                res.append({
+                    "id": f"f1_{race.get('round')}",
+                    "home": race.get("raceName"),
+                    "away": safe_get(race, "Circuit", "circuitName"),
+                    "start": start,
+                    "source": name,
+                    "live": False,
+                    "odds": {},
+                    "sport": "Formula 1"
+                })
+    except Exception as e:
+        log.warning(f"{name} hata: {e}")
     return res
 
 async def fetch_nhl(session):
@@ -606,7 +621,7 @@ async def call_openai_chat(prompt: str, max_tokens=300, temperature=0.2):
     payload = {
         "model": MODEL,
         "messages":[
-            {"role":"system","content":f"Sen Türkçe konuşan, yüksek güvenilirlikte tahminler yapan, bir spor yorumcusu ve kumarbaz zekasına sahip profesyonel bir analistsin. Piyasa hareketlerini, risk ve ödülü değerlendir. Tüm popüler marketler ({market_list}) için en güçlü 1 veya 2 tahminini yap. Tahminlerinin 70'ten (VIP/CANLI/NBA için 85'ten, Oransız maçlar için min 80'den) düşük olmamasına özen göster. Cevabı sadece belirtilen JSON formatında ver. Başka hiçbir açıklayıcı metin kullanma. Confidence 0-100 arasında tam sayı olmalı. Alt/Üst tahminlerini 'Under 2.5' veya 'Over 3.5' formatında yap. Oyuncu prop tahminlerini 'Oyuncu: LeBron James, Tercih: Over 25.5 Sayı' formatında yap."},
+            {"role":"system","content":f"Sen Türkçe konuşan, yüksek güvenilirlikte tahminler yapan, bir spor yorumcusu ve kumarbaz zekasına sahip profesyonel bir analistsin. Piyasa hareketlerini, risk ve ödülü değerlendir. Tüm popüler marketler ({market_list}) için en güçlü 1 veya 2 veya KG VAR/YOK veya 2.5 ÜST/ALT tahminini yap. Tahminlerinin 70'ten (VIP/CANLI/NBA için 85'ten, Oransız maçlar için min 80'den) düşük olmamasına özen göster. Cevabı sadece belirtilen JSON formatında ver. Başka hiçbir açıklayıcı metin kullanma. Confidence 0-100 arasında tam sayı olmalı. Alt/Üst tahminlerini 'Under 2.5' veya 'Over 3.5' formatında yap. Oyuncu prop tahminlerini 'Oyuncu: LeBron James, Tercih: Over 25.5 Sayı' formatında yap."},
             {"role":"user","content": prompt}
         ],
         "temperature": temperature,
@@ -1037,29 +1052,27 @@ async def initial_runs_scheduler(app: Application, all_matches):
     log.info("İlk çalıştırma tamamlandı. Periyodik döngüye geçiliyor.")
 
 
+# ---------------- DÜZELTME 4: job_runner ----------------
 async def job_runner(app: Application):
-    # Global değişken deklarasyonları fonksiyonun en başında
-    global last_run 
-    global ai_rate_limit
-    
-    await asyncio.sleep(15) 
-    
-    initial_run_done = False
-    
+    global last_run, ai_rate_limit
+    await asyncio.sleep(10)
+    initial_done = False
+
     while True:
         try:
             now = datetime.now(timezone.utc)
-            
-            # AI Rate Limit sıfırlama (Her döngü başında)
-            ai_rate_limit["calls"] = 0
-            ai_rate_limit["reset"] = now + timedelta(seconds=60) 
-            
             cleanup_posted_matches()
-            
-            all_matches = await fetch_all_matches() 
-            
-            if not all_matches:
-                log.info("Tüm API'ler boş veya veri yok.")
+
+            # Rate limit sıfırla
+            if now >= ai_rate_limit["reset"]:
+                ai_rate_limit["calls"] = 0
+                ai_rate_limit["reset"] = now + timedelta(minutes=1)
+
+            matches = await fetch_all_matches()
+
+            if not initial_done:
+                await initial_runs_scheduler(app, matches)
+                initial_done = True
             
             # --- İLK ÇALIŞTIRMA BLOĞU ---
             if not initial_run_done:
@@ -1127,30 +1140,22 @@ async def job_runner(app: Application):
                 await run_instant_analysis_job(app, all_matches)
                         
         except Exception as e:
-            log.exception(f"Job runner hata: {e}")
-            
-        await asyncio.sleep(60) # Her dakika kontrol et
+            log.exception(f"Job runner hatası: {e}")
+        await asyncio.sleep(60)
 
-# /app/main.py, run_app fonksiyonu (YENİ VE KESİN DÜZELTME)
 async def run_app():
-    if not TELEGRAM_TOKEN: log.error("TELEGRAM_TOKEN ayarlı değil. Çıkılıyor."); sys.exit(1)
-    if not AI_KEY: log.error("AI_KEY ayarlı değil. Çıkılıyor."); sys.exit(1)
-    if not TELEGRAM_CHAT_ID: log.critical("TELEGRAM_CHAT_ID ayarlı değil. Çıkılıyor."); sys.exit(1)
-        
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    
-    app.add_handler(CommandHandler("test", cmd_test))
-    
-    # 1. Application'ı başlat (Bu, post_init callback'ini ve Job Runner'ı tetikler)
-    log.info("v62.9.4 (Kritik Hatalar Giderildi) başlatılıyor.")
-    await app.start()
+    if not all([TELEGRAM_TOKEN, AI_KEY, TELEGRAM_CHAT_ID]):
+        log.critical("Gerekli ENV değişkenleri eksik!")
+        sys.exit(1)
 
-    # 2. Polling'i başlat
-    log.info("Telegram polling başlatılıyor...")
-    await app.updater.start_polling(
-        allowed_updates=Update.ALL_TYPES, 
-        drop_pending_updates=True
-    )
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("test", cmd_test))
+
+    # Job Runner'ı başlat
+    asyncio.create_task(job_runner(app))
+
+    log.info("Bot polling ile başlatılıyor...")
+    await app.run_polling(drop_pending_updates=True)
     
     # 3. Sonsuz bekleme (Bot çalışırken ana döngünün kapanmasını engeller)
     try:
