@@ -1150,9 +1150,13 @@ async def run_app():
     
     log.info("Telegram polling başlatılıyor...")
     
-    # ✅ KRİTİK DÜZELTME: run_polling yerine run_for_one_of_many kullanıldı
-    # Bu metot, harici asyncio.run() ile çakışmayı önler.
-    await app.run_for_one_of_many(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True) 
+    # ✅ KRİTİK DÜZELTME: stop_signals=None eklendi.
+    # Bu, 'event loop already running' ve 'Cannot close a running event loop' hatalarını önler.
+    await app.run_polling(
+        allowed_updates=Update.ALL_TYPES, 
+        drop_pending_updates=True, 
+        stop_signals=None 
+    ) 
 
 if __name__ == "__main__":
     try:
@@ -1164,3 +1168,4 @@ if __name__ == "__main__":
     except Exception as e:
         log.critical(f"Kritik hata: {e}", exc_info=True)
         sys.exit(1)
+
